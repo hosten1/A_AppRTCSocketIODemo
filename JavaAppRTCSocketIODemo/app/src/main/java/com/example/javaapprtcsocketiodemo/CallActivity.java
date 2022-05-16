@@ -218,7 +218,7 @@ public class CallActivity extends AppCompatActivity {
                     message.put("type", 0);
                     JSONObject data = new JSONObject();
                     data.put("sdp",sessionDescription.description);
-                    data.put("type",sessionDescription.type);
+                    data.put("type","offer");
                     message.put("sdp", data);
                     SocketManager.getInstance().sendMsg(message);
                 } catch (JSONException e) {
@@ -257,7 +257,7 @@ public class CallActivity extends AppCompatActivity {
                     message.put("type", 1);
                     JSONObject data = new JSONObject();
                     data.put("sdp",sessionDescription.description);
-                    data.put("type",sessionDescription.type);
+                    data.put("type","answer");
                     message.put("sdp", data);
                     SocketManager.getInstance().sendMsg(message);
                 } catch (JSONException e) {
