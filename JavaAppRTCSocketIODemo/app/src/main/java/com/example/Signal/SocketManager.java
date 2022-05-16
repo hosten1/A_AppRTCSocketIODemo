@@ -227,11 +227,11 @@ public class SocketManager {
                     if (mListener != null) {
                         mListener.onUserLeaved(roomName, userId);
                     }
+                    Log.i(TAG, "onUserLeaved, room:" + roomName + "uid:" + userId);
 
                 } catch (JSONException e) {
                     e.printStackTrace();
                 }
-                Log.i(TAG, "onUserLeaved, room:" + roomName + "uid:" + userId);
             }
         });
 
@@ -249,11 +249,11 @@ public class SocketManager {
                     if (mListener != null) {
                         mListener.onRemoteUserJoined(roomName);
                     }
+                    Log.i(TAG, "onRemoteUserJoined, room:" + roomName + "uid:" + userId);
 
                 } catch (JSONException e) {
                     e.printStackTrace();
                 }
-                Log.i(TAG, "onRemoteUserJoined, room:" + roomName + "uid:" + userId);
             }
         });
 
@@ -303,12 +303,12 @@ public class SocketManager {
                     if (mListener != null) {
                         mListener.onMessage(msg);
                     }
+                    Log.i(TAG, "onMessage, room:" + roomName + "data:" + msg);
 
                 } catch (JSONException e) {
                     e.printStackTrace();
                 }
 
-                Log.i(TAG, "onMessage, room:" + roomName + "data:" + msg);
 
             }
         });
