@@ -62,14 +62,15 @@ public class CallActivity extends AppCompatActivity {
 
     private static final String TAG = "CallActivity";
 
+    //定义音视频的track id 这个没有限制 只要不重复就可以
     public static final String VIDEO_TRACK_ID = "ARDAMSv0";//"";
     public static final String AUDIO_TRACK_ID = "ARDAMSa0";//"";
 
-    //用于数据传输
+    //用于数据传输及管理连接状态
     private PeerConnection mPeerConnection;
     private PeerConnectionFactory mPeerConnectionFactory;
 
-    //OpenGL ES
+    //OpenGL ES WebRTC提供
     private EglBase mRootEglBase;
     //纹理渲染
     private SurfaceTextureHelper mSurfaceTextureHelper;
@@ -90,11 +91,12 @@ public class CallActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        // 初始化换存消息的接口
         candidateObjList = new ArrayList<JSONObject>(100);
         haveSetRemoteSdp = false;
         setContentView(R.layout.activity_call);
         mLogcatView = findViewById(R.id.logShowTV);
-
+//初始化openGL
         mRootEglBase = EglBase.create();
 
         mLocalSurfaceView = findViewById(R.id.LocalViewRender);
@@ -102,16 +104,19 @@ public class CallActivity extends AppCompatActivity {
 
         mLocalSurfaceView.init(mRootEglBase.getEglBaseContext(), null);
         mLocalSurfaceView.setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FILL);
+//        设置镜像翻转
         mLocalSurfaceView.setMirror(true);
         mLocalSurfaceView.setEnableHardwareScaler(false /* enabled */);
+//        mLocalSurfaceView.;
 
         mRemoteSurfaceView.init(mRootEglBase.getEglBaseContext(), null);
         mRemoteSurfaceView.setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FILL);
         mRemoteSurfaceView.setMirror(true);
         mRemoteSurfaceView.setEnableHardwareScaler(true /* enabled */);
+        // 当view叠加的时候 来确定view的顺序
         mRemoteSurfaceView.setZOrderMediaOverlay(true);
 
-        //创建 factory， pc是从factory里获得的
+        //创建 Factory， pc是从factory里获得的
         mPeerConnectionFactory = createPeerConnectionFactory(this);
 
         // NOTE: this _must_ happen while PeerConnectionFactory is alive!
@@ -302,8 +307,8 @@ public class CallActivity extends AppCompatActivity {
 
         encoderFactory = new DefaultVideoEncoderFactory(
                 mRootEglBase.getEglBaseContext(),
-                false /* enableIntelVp8Encoder */,
-                true);
+                true /* enableIntelVp8Encoder */,
+                false);
         decoderFactory = new DefaultVideoDecoderFactory(mRootEglBase.getEglBaseContext());
 
         PeerConnectionFactory.initialize(PeerConnectionFactory.InitializationOptions.builder(context)

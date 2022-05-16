@@ -11,11 +11,9 @@
 
         <org.webrtc.SurfaceViewRenderer
             android:id="@+id/LocalViewRender"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_gravity="center"
-            android:background="#FFEB3B"
-            android:visibility="visible" />
+            android:layout_width="160dp"
+            android:layout_height="200dp"
+            android:background="@android:color/widget_edittext_dark" />
         <org.webrtc.SurfaceViewRenderer
             android:id="@+id/remoteViewRender"
             android:layout_width="160dp"
@@ -29,7 +27,7 @@
             android:layout_height="wrap_content"
             android:layout_margin="8dp"
             android:gravity="top|start"
-            android:textColor="@android:color/white"
+            android:textColor="#000000"
             tools:text="发发发发发发付 " />
     </FrameLayout>
 </androidx.constraintlayout.widget.ConstraintLayout>
