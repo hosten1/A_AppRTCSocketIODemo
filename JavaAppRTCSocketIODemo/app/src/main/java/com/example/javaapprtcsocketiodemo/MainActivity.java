@@ -43,6 +43,7 @@ public class MainActivity extends AppCompatActivity {
                 Manifest.permission.CAMERA,
                 Manifest.permission.INTERNET,
                 Manifest.permission.RECORD_AUDIO,
+                Manifest.permission.ACCESS_NETWORK_STATE,
         };
         if (!EasyPermissions.hasPermissions(this,params)){
             EasyPermissions.requestPermissions(this,"我们需要你同意使用麦克风和摄像头权限",0,params);

@@ -100,7 +100,7 @@ public class SocketManager {
         void onDisconnected();
         void onUserJoined(String roomName, String userID);
         void onUserLeaved(String roomName, String userID);
-        void onRemoteUserJoined(String roomName);
+        void onRemoteUserJoined(String roomName, String userID);
         void onRemoteUserLeaved(String roomName, String userID);
         void onRoomFull(String roomName, String userID);
         void onMessage(JSONObject message);
@@ -235,7 +235,7 @@ public class SocketManager {
             }
         });
 
-        mSocket.on("otherjoin", new Emitter.Listener() {
+        mSocket.on("otherJoined", new Emitter.Listener() {
 
             @Override
             public void call(Object... args) {
@@ -247,7 +247,7 @@ public class SocketManager {
                     String userId = msg.getString("id");
                     Log.e(TAG, "Received joined msg = " + args.toString());
                     if (mListener != null) {
-                        mListener.onRemoteUserJoined(roomName);
+                        mListener.onRemoteUserJoined(roomName,userId);
                     }
                     Log.i(TAG, "onRemoteUserJoined, room:" + roomName + "uid:" + userId);
 
@@ -294,20 +294,19 @@ public class SocketManager {
         mSocket.on("message", new Emitter.Listener() {
             @Override
             public void call(Object... args) {
-                try {
+//                try {
                     JSONObject msgT = (JSONObject) args[0];
-                    String id = msgT.getString("id");
-                    Log.e(TAG, "Received joined msg = " + args.toString());
-                    JSONObject msg = msgT.getJSONObject("sdp");
-
+//                    String id = msgT.getString("id");
+//                    String roomName =  msgT.getString("room");
+//                    Log.i(TAG, "onMessage, room:" + roomName);
                     if (mListener != null) {
-                        mListener.onMessage(msg);
+                        mListener.onMessage(msgT);
                     }
-                    Log.i(TAG, "onMessage, room:" + roomName + "data:" + msg);
 
-                } catch (JSONException e) {
-                    e.printStackTrace();
-                }
+
+//                } catch (JSONException e) {
+//                    e.printStackTrace();
+//                }
 
 
             }
