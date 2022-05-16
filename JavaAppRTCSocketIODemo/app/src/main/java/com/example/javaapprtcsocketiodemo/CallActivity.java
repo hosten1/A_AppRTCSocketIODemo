@@ -80,6 +80,7 @@ public class CallActivity extends AppCompatActivity {
 
     private VideoTrack mVideoTrack;
     private AudioTrack mAudioTrack;
+    private  VideoTrack remoteVideoTrack;
 
     private VideoCapturer mVideoCapturer;
 
@@ -140,6 +141,34 @@ public class CallActivity extends AppCompatActivity {
         } catch (URISyntaxException e) {
             e.printStackTrace();
         }
+    }
+    @Override
+    protected void onResume() {
+        super.onResume();
+        mVideoCapturer.startCapture(VIDEO_RESOLUTION_WIDTH, VIDEO_RESOLUTION_HEIGHT, VIDEO_FPS);
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        try {
+            mVideoCapturer.stopCapture();
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        doLeave();
+        mLocalSurfaceView.release();
+        mRemoteSurfaceView.release();
+        mVideoCapturer.dispose();
+        mSurfaceTextureHelper.dispose();
+        PeerConnectionFactory.stopInternalTracingCapture();
+        PeerConnectionFactory.shutdownInternalTracer();
+        mPeerConnectionFactory.dispose();
     }
     public static class localeSdpObserver implements SdpObserver {
         @Override
@@ -469,7 +498,8 @@ public class CallActivity extends AppCompatActivity {
             MediaStreamTrack track = rtpReceiver.track();
             if (track instanceof VideoTrack) {
                 Log.i(TAG, "onAddVideoTrack");
-                VideoTrack remoteVideoTrack = (VideoTrack) track;
+                printfToLogCatUtils("peerConnection onAddVideoTrackd ");
+                remoteVideoTrack = (VideoTrack) track;
                 remoteVideoTrack.setEnabled(true);
                 remoteVideoTrack.addSink(mRemoteSurfaceView);
             }
