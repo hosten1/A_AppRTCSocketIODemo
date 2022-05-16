@@ -215,7 +215,7 @@ public class CallActivity extends AppCompatActivity {
                 mPeerConnection.setLocalDescription(new localeSdpObserver(), sessionDescription);
                 JSONObject message = new JSONObject();
                 try {
-                    message.put("type", "0");
+                    message.put("type", 0);
                     JSONObject data = new JSONObject();
                     data.put("sdp",sessionDescription.description);
                     data.put("type",sessionDescription.type);
@@ -254,7 +254,7 @@ public class CallActivity extends AppCompatActivity {
 
                 JSONObject message = new JSONObject();
                 try {
-                    message.put("type", "1");
+                    message.put("type", 1);
                     JSONObject data = new JSONObject();
                     data.put("sdp",sessionDescription.description);
                     data.put("type",sessionDescription.type);
@@ -427,7 +427,7 @@ public class CallActivity extends AppCompatActivity {
 
             try {
                 JSONObject message = new JSONObject();
-                message.put("type", "2");
+                message.put("type", 2);
                 JSONObject data = new JSONObject();
                 data.put("sdpMLineIndex", iceCandidate.sdpMLineIndex);
                 data.put("sdpMid", iceCandidate.sdpMid);
@@ -539,15 +539,15 @@ public class CallActivity extends AppCompatActivity {
             Log.i(TAG, "onMessage: " + message);
 
             try {
-                String type = message.getString("type");
-                if (type.equals("0")) {
+                int type = message.getInt(("type"));
+                if (type == 0) {
                     JSONObject data =  message.getJSONObject("sdp");
                     onRemoteOfferReceived(data);
-                }else if(type.equals("1")) {
+                }else if(type == 1) {
                     JSONObject data =  message.getJSONObject("sdp");
 
                     onRemoteAnswerReceived(data);
-                }else if(type.equals("2")) {
+                }else if(type == 2) {
                     JSONObject data =  message.getJSONObject("candidate");
                     // 如果还没有调用setRemote 那么久先换存起来
                     if (haveSetRemoteSdp){
