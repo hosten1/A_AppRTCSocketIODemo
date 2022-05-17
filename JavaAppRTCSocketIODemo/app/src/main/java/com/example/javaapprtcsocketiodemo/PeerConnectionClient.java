@@ -88,13 +88,13 @@ public class PeerConnectionClient {
   public static final String AUDIO_TRACK_ID = "ARDAMSa0";
   public static final String VIDEO_TRACK_TYPE = "video";
   private static final String TAG = "PCRTCClient";
-  private static final String VIDEO_CODEC_VP8 = "VP8";
-  private static final String VIDEO_CODEC_VP9 = "VP9";
-  private static final String VIDEO_CODEC_H264 = "H264";
-  private static final String VIDEO_CODEC_H264_BASELINE = "H264 Baseline";
-  private static final String VIDEO_CODEC_H264_HIGH = "H264 High";
-  private static final String AUDIO_CODEC_OPUS = "opus";
-  private static final String AUDIO_CODEC_ISAC = "ISAC";
+  public static final String VIDEO_CODEC_VP8 = "VP8";
+  public static final String VIDEO_CODEC_VP9 = "VP9";
+  public static final String VIDEO_CODEC_H264 = "H264";
+  public static final String VIDEO_CODEC_H264_BASELINE = "H264 Baseline";
+  public static final String VIDEO_CODEC_H264_HIGH = "H264 High";
+  public static final String AUDIO_CODEC_OPUS = "opus";
+  public static final String AUDIO_CODEC_ISAC = "ISAC";
   private static final String VIDEO_CODEC_PARAM_START_BITRATE = "x-google-start-bitrate";
   private static final String VIDEO_FLEXFEC_FIELDTRIAL =
       "WebRTC-FlexFEC-03-Advertised/Enabled/WebRTC-FlexFEC-03/Enabled/";

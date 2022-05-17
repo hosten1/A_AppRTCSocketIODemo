@@ -1,33 +1,37 @@
 <?xml version="1.0" encoding="utf-8"?>
-<androidx.constraintlayout.widget.ConstraintLayout
+<FrameLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
-    <FrameLayout
-        android:id="@+id/FrameLayout"
+    android:layout_height="match_parent"
+    tools:ignore="MergeRootFrame">
+
+    <org.webrtc.SurfaceViewRenderer
+        android:id="@+id/LocalViewRender"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center" />
+    <org.webrtc.SurfaceViewRenderer
+        android:id="@+id/remoteViewRender"
+        android:layout_height="144dp"
+        android:layout_width="wrap_content"
+        android:layout_gravity="bottom|end"
+        android:layout_margin="16dp"/>
+
+    <TextView
+        android:id="@+id/logShowTV"
         android:layout_width="match_parent"
-        android:layout_height="match_parent"   >
-
-        <org.webrtc.SurfaceViewRenderer
-            android:id="@+id/LocalViewRender"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:background="@android:color/widget_edittext_dark" />
-        <org.webrtc.SurfaceViewRenderer
-            android:id="@+id/remoteViewRender"
-            android:layout_width="160dp"
-            android:layout_height="200dp"
-            android:layout_margin="10dp"
-            android:layout_gravity="top|end"/>
-
-        <TextView
-            android:id="@+id/logShowTV"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_margin="8dp"
-            android:gravity="top|start"
-            android:textColor="#000000"
-            tools:text="发发发发发发付 " />
-    </FrameLayout>
-</androidx.constraintlayout.widget.ConstraintLayout>
+        android:layout_height="wrap_content"
+        android:layout_margin="8dp"
+        android:gravity="top|start"
+        android:textColor="#FF0000"
+        tools:text="发发发发发发付 " />
+    <FrameLayout
+        android:id="@+id/call_fragment_container"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+    <FrameLayout
+        android:id="@+id/hud_fragment_container"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+</FrameLayout>

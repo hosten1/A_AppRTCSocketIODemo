@@ -1,6 +1,5 @@
 package com.example.javaapprtcsocketiodemo;
 
-import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 
@@ -31,6 +30,7 @@ import org.webrtc.EglBase;
 import org.webrtc.FileVideoCapturer;
 import org.webrtc.IceCandidate;
 import org.webrtc.Logging;
+import org.webrtc.PeerConnection;
 import org.webrtc.PeerConnectionFactory;
 import org.webrtc.RendererCommon;
 import org.webrtc.ScreenCapturerAndroid;
@@ -44,21 +44,21 @@ import org.webrtc.VideoSink;
 import java.io.IOException;
 import java.net.URISyntaxException;
 import java.util.ArrayList;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Set;
 
 enum  RTCLYMStats{
 
 }
-public class CallActivity extends AppCompatActivity implements APPRTCSignalClient.SignalingEvents,
-        PeerConnectionClient.PeerConnectionEvents{
+public class CallActivity extends AppCompatActivity {
     private static final int VIDEO_RESOLUTION_WIDTH = 1280;
     private static final int VIDEO_RESOLUTION_HEIGHT = 720;
     private static final int VIDEO_FPS = 30;
     private static final int CAPTURE_PERMISSION_REQUEST_CODE = 1;
     //定义音视频的track id 这个没有限制 只要不重复就可以
-    public static final String VIDEO_TRACK_ID = "ARDAMSv0";//"";
-    public static final String AUDIO_TRACK_ID = "ARDAMSa0";//"";
+//    public static final String VIDEO_TRACK_ID = "ARDAMSv0";//"";
+//    public static final String AUDIO_TRACK_ID = "ARDAMSa0";//"";
     public static final boolean EXTRA_OPENSLES_ENABLED = true;
     public static final boolean EXTRA_ORDERED = true;
     // Peer connection statistics callback period in ms.
@@ -94,8 +94,6 @@ public class CallActivity extends AppCompatActivity implements APPRTCSignalClien
     private final ProxyVideoSink remoteProxyRenderer = new ProxyVideoSink();
     private final ProxyVideoSink localProxyVideoSink = new ProxyVideoSink();
     @Nullable private PeerConnectionClient peerConnectionClient;
-    @Nullable
-    private APPRTCSignalClient appRtcClient;
     @Nullable
     private APPRTCSignalClient.SignalingParameters signalingParameters;
     // 音频管理类
@@ -140,7 +138,6 @@ public class CallActivity extends AppCompatActivity implements APPRTCSignalClien
     private boolean haveSetRemoteSdp = false;
 
 
-    private APPRTCSignalClient.SignalingEvents events;
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -217,10 +214,10 @@ public class CallActivity extends AppCompatActivity implements APPRTCSignalClien
         peerConnectionParameters =
                 new PeerConnectionClient.PeerConnectionParameters(true, false,
                         false, VIDEO_RESOLUTION_WIDTH, VIDEO_RESOLUTION_HEIGHT,VIDEO_FPS,
-                        8000, "vp8",
+                        8000, PeerConnectionClient.VIDEO_CODEC_VP8,
                         true,
                        false,
-                        60, "opus",
+                        60, PeerConnectionClient.AUDIO_CODEC_OPUS,
                         false,
                         false,
                         false,
@@ -243,7 +240,7 @@ public class CallActivity extends AppCompatActivity implements APPRTCSignalClien
         }
         // Create peer connection client.
         peerConnectionClient = new PeerConnectionClient(
-                getApplicationContext(), eglBase, peerConnectionParameters, CallActivity.this);
+                getApplicationContext(), eglBase, peerConnectionParameters, mEvent);
         PeerConnectionFactory.Options options = new PeerConnectionFactory.Options();
 //        如果是本地回环需要把networkIgnoreMask标记成0
 //        if (loopback) {
@@ -338,10 +335,6 @@ public class CallActivity extends AppCompatActivity implements APPRTCSignalClien
                 mediaProjectionManager.createScreenCaptureIntent(), CAPTURE_PERMISSION_REQUEST_CODE);
     }
     private void startCall() {
-        if (appRtcClient == null) {
-            Log.e(TAG, "AppRTC client is not allocated for a call.");
-            return;
-        }
         callStartedTimeMs = System.currentTimeMillis();
 
         // 创建一个音频管理，用于处理音频路由，音频模式，及设备的枚举
@@ -385,10 +378,7 @@ public class CallActivity extends AppCompatActivity implements APPRTCSignalClien
         activityRunning = false;
         remoteProxyRenderer.setTarget(null);
         localProxyVideoSink.setTarget(null);
-        if (appRtcClient != null) {
-            appRtcClient.disconnectFromRoom();
-            appRtcClient = null;
-        }
+        SocketManager.getInstance().close();
         if (candidateObjList.size() > 0){
             candidateObjList.clear();
             candidateObjList = null;
@@ -579,6 +569,16 @@ public class CallActivity extends AppCompatActivity implements APPRTCSignalClien
             }
         });
     }
+    private LinkedList<PeerConnection.IceServer> getIceSerVerList(){
+        LinkedList<PeerConnection.IceServer> iceServers = new LinkedList<PeerConnection.IceServer>();
+        PeerConnection.IceServer ice_server =
+                PeerConnection.IceServer.builder("turn:www.lymggylove.top:3478")
+                        .setPassword("123456")
+                        .setUsername("lym")
+                        .createIceServer();
+        iceServers.add(ice_server);
+        return iceServers;
+    }
     private void disconnectWithErrorMessage(final String errorMessage) {
         new AlertDialog.Builder(this)
                 .setTitle(getText(R.string.channel_error_title))
@@ -596,7 +596,6 @@ public class CallActivity extends AppCompatActivity implements APPRTCSignalClien
                 .show();
     }
 
-    @Override
     public void onConnectedToRoom(APPRTCSignalClient.SignalingParameters params) {
         runOnUiThread(new Runnable() {
             @Override
@@ -606,7 +605,6 @@ public class CallActivity extends AppCompatActivity implements APPRTCSignalClien
         });
     }
 
-    @Override
     public void onRemoteDescription(SessionDescription sdp) {
         final long delta = System.currentTimeMillis() - callStartedTimeMs;
         runOnUiThread(new Runnable() {
@@ -624,9 +622,124 @@ public class CallActivity extends AppCompatActivity implements APPRTCSignalClien
                     // PeerConnectionEvents.onLocalDescription event.
                     peerConnectionClient.createAnswer();
                 }
+                haveSetRemoteSdp = true;
+                addIceCandidateClear();
             }
         });
     }
+    private PeerConnectionClient.PeerConnectionEvents mEvent = new PeerConnectionClient.PeerConnectionEvents() {
+
+        @Override
+        public void onLocalDescription(SessionDescription sdp) {
+            final long delta = System.currentTimeMillis() - callStartedTimeMs;
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    logAndToast("Sending " + sdp.type + ", delay=" + delta + "ms");
+                    if (signalingParameters.initiator) {
+                        sendSDP(true,sdp.description);
+                    } else {
+                        sendSDP(false,sdp.description);
+                    }
+                    if (peerConnectionParameters.videoMaxBitrate > 0) {
+                        Log.d(TAG, "Set video maximum bitrate: " + peerConnectionParameters.videoMaxBitrate);
+                        peerConnectionClient.setVideoMaxBitrate(peerConnectionParameters.videoMaxBitrate);
+                    }
+                }
+            });
+        }
+
+        @Override
+        public void onIceCandidate(IceCandidate candidate) {
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    sendIceCandidate(candidate);
+                }
+            });
+        }
+
+        @Override
+        public void onIceCandidatesRemoved(IceCandidate[] candidates) {
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+//                if (appRtcClient != null) {
+//                    appRtcClient.sendLocalIceCandidateRemovals(candidates);
+//                }
+                }
+            });
+        }
+
+        @Override
+        public void onIceConnected() {
+            final long delta = System.currentTimeMillis() - callStartedTimeMs;
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    logAndToast("ICE connected, delay=" + delta + "ms");
+                }
+            });
+        }
+
+        @Override
+        public void onIceDisconnected() {
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    logAndToast("ICE disconnected");
+                }
+            });
+        }
+
+        @Override
+        public void onConnected() {
+            final long delta = System.currentTimeMillis() - callStartedTimeMs;
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    logAndToast("DTLS connected, delay=" + delta + "ms");
+                    connected = true;
+                    // 连接成功后 可以开始获取stats
+                    callConnected();
+                }
+            });
+        }
+
+        @Override
+        public void onDisconnected() {
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    logAndToast("DTLS disconnected");
+                    connected = false;
+                    disconnect();
+                }
+            });
+        }
+
+        @Override
+        public void onPeerConnectionClosed() {
+
+        }
+
+        @Override
+        public void onPeerConnectionStatsReady(StatsReport[] reports) {
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    if (!isError && connected) {
+//                    hudFragment.updateEncoderStatistics(reports);
+                    }
+                }
+            });
+        }
+
+        @Override
+        public void onPeerConnectionError(String description) {
+            reportError(description);
+        }
+    };
     // -----Implementation of AppRTCClient.AppRTCSignalingEvents ---------------
     // socketio的消息回调，所有的消息都要确保在主线程执行.
     private void onConnectedToRoomInternal(final APPRTCSignalClient.SignalingParameters params) {
@@ -653,31 +766,42 @@ public class CallActivity extends AppCompatActivity implements APPRTCSignalClien
                 // Create answer. Answer SDP will be sent to offering client in
                 // PeerConnectionEvents.onLocalDescription event.
                 peerConnectionClient.createAnswer();
+                haveSetRemoteSdp = true;
+                addIceCandidateClear();
             }
-            if (params.iceCandidates != null) {
-                // Add remote ICE candidates from room.
-                for (IceCandidate iceCandidate : params.iceCandidates) {
-                    peerConnectionClient.addRemoteIceCandidate(iceCandidate);
-                }
-            }
+
         }
     }
-    @Override
+    private void addIceCandidateClear(){
+        if (candidateObjList != null) {
+            // Add remote ICE candidates from room.
+            for (IceCandidate iceCandidate : candidateObjList) {
+                peerConnectionClient.addRemoteIceCandidate(iceCandidate);
+            }
+            candidateObjList.clear();
+        }
+    }
+
     public void onRemoteIceCandidate(IceCandidate candidate) {
 
         runOnUiThread(new Runnable() {
             @Override
             public void run() {
-                if (peerConnectionClient == null) {
-                    Log.e(TAG, "Received ICE candidate for a non-initialized peer connection.");
-                    return;
+                // 如果还没有调用setRemote 那么久先换存起来
+                if (haveSetRemoteSdp){
+                    if (peerConnectionClient == null) {
+                        Log.e(TAG, "Received ICE candidate for a non-initialized peer connection.");
+                        return;
+                    }
+                    peerConnectionClient.addRemoteIceCandidate(candidate);
+                }else{
+                    candidateObjList.add(candidate);
                 }
-                peerConnectionClient.addRemoteIceCandidate(candidate);
+
             }
         });
     }
 
-    @Override
     public void onRemoteIceCandidatesRemoved(IceCandidate[] candidates) {
         runOnUiThread(new Runnable() {
             @Override
@@ -691,7 +815,6 @@ public class CallActivity extends AppCompatActivity implements APPRTCSignalClien
         });
     }
 
-    @Override
     public void onChannelClose() {
         runOnUiThread(new Runnable() {
             @Override
@@ -702,139 +825,19 @@ public class CallActivity extends AppCompatActivity implements APPRTCSignalClien
         });
     }
 
-    @Override
     public void onChannelError(String description) {
         reportError(description);
     }
+    // -----Implementation of PeerConnectionClient.PeerConnectionEvents.---------
+    // Send local peer connection SDP and ICE candidates to remote party.
+    // All callbacks are invoked from peer connection client looper thread and
+    // are routed to UI thread.
 
-    @Override
-    public void onLocalDescription(SessionDescription sdp) {
-        final long delta = System.currentTimeMillis() - callStartedTimeMs;
-        runOnUiThread(new Runnable() {
-            @Override
-            public void run() {
-                if (appRtcClient != null) {
-                    logAndToast("Sending " + sdp.type + ", delay=" + delta + "ms");
-                    if (signalingParameters.initiator) {
-                        sendSDP(true,sdp.description);
-                    } else {
-                        sendSDP(false,sdp.description);
-                    }
-                }
-                if (peerConnectionParameters.videoMaxBitrate > 0) {
-                    Log.d(TAG, "Set video maximum bitrate: " + peerConnectionParameters.videoMaxBitrate);
-                    peerConnectionClient.setVideoMaxBitrate(peerConnectionParameters.videoMaxBitrate);
-                }
-            }
-        });
-    }
-
-    @Override
-    public void onIceCandidate(IceCandidate candidate) {
-        runOnUiThread(new Runnable() {
-            @Override
-            public void run() {
-                sendIceCandidate(candidate);
-            }
-        });
-    }
-
-    @Override
-    public void onIceCandidatesRemoved(IceCandidate[] candidates) {
-        runOnUiThread(new Runnable() {
-            @Override
-            public void run() {
-//                if (appRtcClient != null) {
-//                    appRtcClient.sendLocalIceCandidateRemovals(candidates);
-//                }
-            }
-        });
-    }
-
-    @Override
-    public void onIceConnected() {
-        final long delta = System.currentTimeMillis() - callStartedTimeMs;
-        runOnUiThread(new Runnable() {
-            @Override
-            public void run() {
-                logAndToast("ICE connected, delay=" + delta + "ms");
-            }
-        });
-    }
-
-    @Override
-    public void onIceDisconnected() {
-        runOnUiThread(new Runnable() {
-            @Override
-            public void run() {
-                logAndToast("ICE disconnected");
-            }
-        });
-    }
-
-    @Override
-    public void onConnected() {
-        final long delta = System.currentTimeMillis() - callStartedTimeMs;
-        runOnUiThread(new Runnable() {
-            @Override
-            public void run() {
-                logAndToast("DTLS connected, delay=" + delta + "ms");
-                connected = true;
-                // 连接成功后 可以开始获取stats
-                callConnected();
-            }
-        });
-    }
-
-    @Override
-    public void onDisconnected() {
-        runOnUiThread(new Runnable() {
-            @Override
-            public void run() {
-                logAndToast("DTLS disconnected");
-                connected = false;
-                disconnect();
-            }
-        });
-    }
-
-    @Override
-    public void onPeerConnectionClosed() {
-
-    }
-
-    @Override
-    public void onPeerConnectionStatsReady(StatsReport[] reports) {
-        runOnUiThread(new Runnable() {
-            @Override
-            public void run() {
-                if (!isError && connected) {
-//                    hudFragment.updateEncoderStatistics(reports);
-                }
-            }
-        });
-    }
-
-    @Override
-    public void onPeerConnectionError(String description) {
-        reportError(description);
-    }
-
-
-    //    MediaStreamTrack track = rtpReceiver.track();
-//            if (track instanceof VideoTrack) {
-//        Log.i(TAG, "onAddVideoTrack");
-//        printfToLogCatUtils("peerConnection onAddVideoTrackd ");
-//        remoteVideoTrack = (VideoTrack) track;
-//        remoteVideoTrack.setEnabled(true);
-//        remoteVideoTrack.addSink(mRemoteSurfaceView);
-//    }
     // 设置socket消息监听
     private  SocketManager.OnSocketEventListener mOnSignalEventListener = new SocketManager.OnSocketEventListener() {
         @Override
         public void onConnected() {
             printfToLogCatUtils("socket  connected ");
-
         }
 
         @Override
@@ -858,7 +861,7 @@ public class CallActivity extends AppCompatActivity implements APPRTCSignalClien
 
         @Override
         public void onUserLeaved(String roomName, String userID) {
-            events.onChannelClose();
+            onChannelClose();
 
             printfToLogCatUtils("Receive Remote Hangup Event ...");
         }
@@ -870,18 +873,18 @@ public class CallActivity extends AppCompatActivity implements APPRTCSignalClien
             }
             //调用call， 进行媒体协商
             printfToLogCatUtils("Receive other user joined : " + userID);
-            signalingParameters = new APPRTCSignalClient.SignalingParameters(null,
+            signalingParameters = new APPRTCSignalClient.SignalingParameters(getIceSerVerList(),
                     true,
                     "1234",
                     "",
                     "",
                     null,null);
-            events.onConnectedToRoom(signalingParameters);
+            onConnectedToRoom(signalingParameters);
         }
 
         @Override
         public void onRemoteUserLeaved(String roomName, String userID) {
-            events.onChannelClose();
+            onChannelClose();
         }
 
         @Override
@@ -895,19 +898,12 @@ public class CallActivity extends AppCompatActivity implements APPRTCSignalClien
 //                return;
 //            }
             Log.i(TAG, "onMessage: " + message);
-
             try {
                 int type = message.getInt(("type"));
                 if (type == 0) {
                     JSONObject data =  message.getJSONObject("sdp");
                     String description = data.getString("sdp");
-                    events.onRemoteDescription(new SessionDescription(
-                            SessionDescription.Type.OFFER,
-                            description));
-                }else if(type == 1) {
-                    JSONObject data =  message.getJSONObject("sdp");
-                    String description = data.getString("sdp");
-                    signalingParameters = new APPRTCSignalClient.SignalingParameters(null,
+                    signalingParameters = new APPRTCSignalClient.SignalingParameters(getIceSerVerList(),
                             false,
                             "1234",
                             "",
@@ -915,21 +911,24 @@ public class CallActivity extends AppCompatActivity implements APPRTCSignalClien
                             new SessionDescription(
                                     SessionDescription.Type.OFFER,
                                     description),null);
-                    events.onConnectedToRoom(signalingParameters);
+                    onConnectedToRoom(signalingParameters);
+                }else if(type == 1) {
+                    JSONObject data =  message.getJSONObject("sdp");
+                    String description = data.getString("sdp");
+                    onRemoteDescription(new SessionDescription(
+                            SessionDescription.Type.ANSWER,
+                            description));
 
                 }else if(type == 2) {
                     JSONObject data =  message.getJSONObject("candidate");
+//                    printfToLogCatUtils("receive msg :"+data.toString());
                     IceCandidate remoteIceCandidate =
                             new IceCandidate(data.getString("sdpMid"),
                                     data.getInt("sdpMLineIndex"),
                                     data.getString("candidate"));
-                    // 如果还没有调用setRemote 那么久先换存起来
-                    if (haveSetRemoteSdp){
+                    onRemoteIceCandidate(remoteIceCandidate);
 
-                        events.onRemoteIceCandidate(remoteIceCandidate);
-                    }else{
-                        candidateObjList.add(remoteIceCandidate);
-                    }
+
                 }else{
                     Log.w(TAG, "the type is invalid: " + type);
                 }
