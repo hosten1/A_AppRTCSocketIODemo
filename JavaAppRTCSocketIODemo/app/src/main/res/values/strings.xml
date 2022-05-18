@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">JavaAppRTCSocketIODemo</string>
+    <string name="app_name">WebRTC测试</string>
     <string name="serverName">服务地址:</string>
     <string name="roomName">房间名:</string>
     <string name="https_www_lymggylove_top">https://www.lymggylove.top</string>
