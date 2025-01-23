@@ -18,6 +18,7 @@ import javax.net.ssl.SSLSocketFactory;
 import javax.net.ssl.TrustManager;
 import javax.net.ssl.X509TrustManager;
 
+import io.socket.client.Ack;
 import io.socket.client.IO;
 import io.socket.client.Socket;
 import io.socket.emitter.Emitter;
@@ -127,8 +128,6 @@ public class SocketManager {
                     .sslSocketFactory(SSLSocketClient.getSSLSocketFactory(),SSLSocketClient.myX509TrustManager)
                     .build();
 
-//default settings for all sockets
-
             IO.setDefaultOkHttpWebSocketFactory(okHttpClient);
 
             IO.setDefaultOkHttpCallFactory(okHttpClient);
@@ -195,12 +194,10 @@ public class SocketManager {
                 }
             }
         });
-        mSocket.on("joined", new Emitter.Listener() {
+      Emitter emit = mSocket.on("joined", new Emitter.Listener() {
             @Override
             public void call(Object... args) {
                 try {
-
-
                     JSONObject msg = (JSONObject) args[0];
                     String roomName = msg.getString("room");
                     String userId = msg.getString("id");
@@ -208,6 +205,26 @@ public class SocketManager {
                     if (mListener != null) {
                         mListener.onUserJoined(roomName, userId);
                     }
+                    Ack ack;
+                    Object[] _args;
+                    int lastIndex = args.length - 1;
+                    // 2
+                    if (args.length > 0 && args[lastIndex] instanceof Ack) {
+                        _args = new Object[lastIndex];
+                        for (int i = 0; i < lastIndex; i++) {
+                            _args[i] = args[i];
+                        }
+                        // 3
+                        ack = (Ack) args[lastIndex];
+                    } else {
+                        _args = args;
+                        ack = null;
+                    }
+                    // 4
+                    if(ack != null){
+                        ack.call("1234");
+                    }
+
 
                 } catch (JSONException e) {
                     e.printStackTrace();
@@ -319,7 +336,19 @@ public class SocketManager {
         if (mSocket == null) {
             return;
         }
-        mSocket.emit("message", mRoomName, message);
+        mSocket.emit("message", mRoomName, message, new Ack() {
+            @Override
+            public void call(Object... args) {
+                Log.i(TAG,"recv ack msg："+args[0].toString());
+            }
+        });
+    }
+    public  void  sendMsg(JSONObject message, Ack ack){
+        Log.i(TAG, "broadcast: " + message);
+        if (mSocket == null) {
+            return;
+        }
+        mSocket.emit("message", mRoomName,message,ack);
     }
 
     public  void  close(){
