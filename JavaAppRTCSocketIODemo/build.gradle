@@ -8,7 +8,9 @@ buildscript {
         
     }
     dependencies {
-        classpath 'com.android.tools.build:gradle:7.2.0'
+        // 使用兼容 Gradle 8.10 的 AGP 版本
+//        classpath 'com.android.tools.build:gradle:8.3.0'
+         classpath 'com.android.tools.build:gradle:8.4.2'
         
 
         // NOTE: Do not place your application dependencies here; they belong

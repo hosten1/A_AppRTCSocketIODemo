@@ -24,7 +24,7 @@
             android:layout_marginRight="10dp"
             android:ems="10"
             android:inputType="textPersonName"
-            android:text="@string/https_www_lymggylove_top" />
+            android:text="8.137.17.218" />
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
