@@ -6,9 +6,12 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.net.URISyntaxException;
+import java.security.KeyManagementException;
+import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.security.cert.CertificateException;
 import java.security.cert.X509Certificate;
+import java.util.Arrays;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -23,7 +26,9 @@ import io.socket.client.Ack;
 import io.socket.client.IO;
 import io.socket.client.Socket;
 import io.socket.emitter.Emitter;
+import okhttp3.Call;
 import okhttp3.OkHttpClient;
+import okhttp3.WebSocket;
 
 class SSLSocketClient {
 
@@ -127,24 +132,47 @@ public class SocketManager {
         Log.i(TAG,"join() serverAddr = "+serverAdd +" roomName = "+roomName);
         try {
 
+            // 创建信任所有证书的客户端
+            TrustManager[] trustAllCerts = new TrustManager[]{new X509TrustManager() {
+                public void checkClientTrusted(X509Certificate[] chain, String authType) {}
+                public void checkServerTrusted(X509Certificate[] chain, String authType) {}
+                public X509Certificate[] getAcceptedIssuers() {
+                    return new X509Certificate[0];
+                }
+            }};
+
+            SSLContext sslContext = SSLContext.getInstance("TLS");
+            sslContext.init(null, trustAllCerts, new SecureRandom());
+
             OkHttpClient okHttpClient = new OkHttpClient.Builder()
-                    .hostnameVerifier(SSLSocketClient.getHostnameVerifier())
-                    .sslSocketFactory(SSLSocketClient.getSSLSocketFactory(),SSLSocketClient.myX509TrustManager)
+                    .hostnameVerifier((hostname, session) -> true)
+                    .sslSocketFactory(sslContext.getSocketFactory(), (X509TrustManager) trustAllCerts[0])
                     .build();
 
-            IO.setDefaultOkHttpWebSocketFactory(okHttpClient);
+            // 配置Socket.IO选项
+            IO.Options options = new IO.Options();
+            options.secure = false;
+            options.callFactory = okHttpClient;
+            options.webSocketFactory = okHttpClient;
+            options.reconnection = true;
+            options.reconnectionAttempts = 5;  // 增加重连次数
+            options.reconnectionDelay = 1000;  // 重连延迟1秒
+            options.timeout = 15000;           // 超时时间15秒
+            options.query = "EIO=3"; // v2 协议使用 EIO=3
+            options.forceNew = true;
+            options.transports = new String[]{"websocket"}; // 强制使用WebSocket
 
-            IO.setDefaultOkHttpCallFactory(okHttpClient);
-            IO.Options opt = new  IO.Options();
-            opt.secure = true;
-            opt.callFactory=okHttpClient;
-            opt.webSocketFactory=okHttpClient;
-
-            mSocket =  IO.socket(serverAdd,opt);
+            mSocket =  IO.socket(serverAdd,options);
+            // 添加连接超时监听
+            mSocket.io().timeout(30000); // 30秒超时
             mSocket.connect();
         }catch (URISyntaxException e){
             e.printStackTrace();
             return;
+        } catch (KeyManagementException e) {
+            throw new RuntimeException(e);
+        } catch (NoSuchAlgorithmException e) {
+            throw new RuntimeException(e);
         }
         mRoomName = roomName;
         if (mSocket == null){
@@ -155,7 +183,7 @@ public class SocketManager {
             @Override
             public void call(Object... args) {
 
-                Log.e(TAG, "onConnectError: " + args);
+                Log.e(TAG, "onConnectError: " + Arrays.toString(args));
             }
         });
 

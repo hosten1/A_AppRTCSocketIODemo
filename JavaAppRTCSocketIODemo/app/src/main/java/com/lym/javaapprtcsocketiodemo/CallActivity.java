@@ -231,6 +231,7 @@ public class CallActivity extends AppCompatActivity {
         // 设置socket 消息监听
         SocketManager.getInstance().setListener(mOnSignalEventListener);
         String serverAddr = intent.getStringExtra("ServerAddr");
+        serverAddr = "https://"+serverAddr;
         String roomName =   intent.getStringExtra("RoomName");
         try {
             // 加入房间
