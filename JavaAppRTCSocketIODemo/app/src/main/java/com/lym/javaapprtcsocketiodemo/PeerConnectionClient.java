@@ -83,6 +83,11 @@ import org.webrtc.audio.JavaAudioDeviceModule.AudioTrackErrorCallback;
  * All PeerConnectionEvents callbacks are invoked from the same looper thread.
  * This class is a singleton.
  */
+/*
+ * 改造后的 PeerConnectionClient 类
+ * 支持多个 PeerConnection 实例
+ * 分离 offer 和 answer SDP 回调
+ */
 public class PeerConnectionClient {
 
   public static final String VIDEO_TRACK_ID = "ARDAMSv0";
@@ -98,10 +103,10 @@ public class PeerConnectionClient {
   public static final String AUDIO_CODEC_ISAC = "ISAC";
   private static final String VIDEO_CODEC_PARAM_START_BITRATE = "x-google-start-bitrate";
   private static final String VIDEO_FLEXFEC_FIELDTRIAL =
-      "WebRTC-FlexFEC-03-Advertised/Enabled/WebRTC-FlexFEC-03/Enabled/";
+          "WebRTC-FlexFEC-03-Advertised/Enabled/WebRTC-FlexFEC-03/Enabled/";
   private static final String VIDEO_VP8_INTEL_HW_ENCODER_FIELDTRIAL = "WebRTC-IntelVP8/Enabled/";
   private static final String DISABLE_WEBRTC_AGC_FIELDTRIAL =
-      "WebRTC-Audio-MinimizeResamplingOnMobile/Enabled/";
+          "WebRTC-Audio-MinimizeResamplingOnMobile/Enabled/";
   private static final String AUDIO_CODEC_PARAM_BITRATE = "maxaveragebitrate";
   private static final String AUDIO_ECHO_CANCELLATION_CONSTRAINT = "googEchoCancellation";
   private static final String AUDIO_AUTO_GAIN_CONTROL_CONSTRAINT = "googAutoGainControl";
@@ -118,63 +123,77 @@ public class PeerConnectionClient {
   // created on the same thread as previously destroyed factory.
   private static final ExecutorService executor = Executors.newSingleThreadExecutor();
 
-  private final PCObserver pcObserver = new PCObserver();
-  private final SDPObserver sdpObserver = new SDPObserver();
   private final Timer statsTimer = new Timer();
   private final EglBase rootEglBase;
   private final Context appContext;
   private final PeerConnectionParameters peerConnectionParameters;
   private final PeerConnectionEvents events;
+  private final PeerConnectionFactory.Options factoryOptions;
 
   @Nullable
   private PeerConnectionFactory factory;
-  @Nullable
-  private PeerConnection peerConnection;
-  @Nullable
-  private AudioSource audioSource;
-  @Nullable private SurfaceTextureHelper surfaceTextureHelper;
-  @Nullable private VideoSource videoSource;
   private boolean preferIsac;
-  private boolean videoCapturerStopped;
-  private boolean isError;
-  @Nullable
-  private VideoSink localRender;
-  @Nullable private List<VideoSink> remoteSinks;
-  private APPRTCSignalClient.SignalingParameters signalingParameters;
   private int videoWidth;
   private int videoHeight;
   private int videoFps;
   private MediaConstraints audioConstraints;
   private MediaConstraints sdpMediaConstraints;
-  // Queued remote ICE candidates are consumed only after both local and
-  // remote descriptions are set. Similarly local ICE candidates are sent to
-  // remote peer after both local and remote description are set.
-  @Nullable
-  private List<IceCandidate> queuedRemoteCandidates;
-  private boolean isInitiator;
-  @Nullable
-  private SessionDescription localSdp; // either offer or answer SDP
-  @Nullable
-  private VideoCapturer videoCapturer;
-  // enableVideo is set to true if video should be rendered and sent.
   private boolean renderVideo = true;
-  @Nullable
-  private VideoTrack localVideoTrack;
-  @Nullable
-  private RtpSender localVideoSender;
-  // enableAudio is set to true if audio should be sent.
   private boolean enableAudio = true;
-  @Nullable
-  private AudioTrack localAudioTrack;
-  @Nullable
-  private DataChannel dataChannel;
+  public VideoTrack localVideoTrack;
+
+
+  // 封装单个 PeerConnection 的状态
+  private static class PeerConnectionHolder {
+    public PeerConnection peerConnection;
+    public SessionDescription localSdp;
+    public List<IceCandidate> queuedRemoteCandidates;
+    public boolean isInitiator;
+    public RtpSender localVideoSender;
+    public VideoTrack remoteVideoTrack;
+    public DataChannel dataChannel;
+    public VideoCapturer videoCapturer;
+    public VideoSource videoSource;
+    public SurfaceTextureHelper surfaceTextureHelper;
+    public boolean videoCapturerStopped = true;
+    public final String connectionId;
+    public boolean isError;
+    public AudioSource audioSource;
+    public AudioTrack localAudioTrack;
+    public RtcEventLog rtcEventLog;
+
+    public PeerConnectionHolder(String connectionId) {
+      this.connectionId = connectionId;
+    }
+  }
+
+  // 修改后的回调接口
+  public interface PeerConnectionEvents {
+    void onLocalOffer(String connectionId, SessionDescription sdp);
+
+    void onLocalAnswer(String connectionId, SessionDescription sdp);
+
+    void onIceCandidate(String connectionId, IceCandidate candidate);
+
+    void onIceCandidatesRemoved(String connectionId, IceCandidate[] candidates);
+
+    void onIceConnected(String connectionId);
+
+    void onIceDisconnected(String connectionId);
+
+    void onConnected(String connectionId);
+
+    void onDisconnected(String connectionId);
+
+    void onPeerConnectionClosed(String connectionId);
+
+    void onPeerConnectionStatsReady(String connectionId, StatsReport[] reports);
+
+    void onPeerConnectionError(String connectionId, String description);
+  }
+
+  private final Map<String, PeerConnectionHolder> peerConnections = new ConcurrentHashMap<>();
   private final boolean dataChannelEnabled;
-  // Enable RtcEventLog.
-  @Nullable
-  private RtcEventLog rtcEventLog;
-  // Implements the WebRtcAudioRecordSamplesReadyCallback interface and writes
-  // recorded audio samples to an output file.
-//  @Nullable private RecordedAudioToFileController saveRecordedAudioToFile;
 
   /**
    * Peer connection parameters.
@@ -188,7 +207,7 @@ public class PeerConnectionClient {
     public final int id;
 
     public DataChannelParameters(boolean ordered, int maxRetransmitTimeMs, int maxRetransmits,
-        String protocol, boolean negotiated, int id) {
+                                 String protocol, boolean negotiated, int id) {
       this.ordered = ordered;
       this.maxRetransmitTimeMs = maxRetransmitTimeMs;
       this.maxRetransmits = maxRetransmits;
@@ -226,12 +245,12 @@ public class PeerConnectionClient {
     private final DataChannelParameters dataChannelParameters;
 
     public PeerConnectionParameters(boolean videoCallEnabled, boolean loopback, boolean tracing,
-        int videoWidth, int videoHeight, int videoFps, int videoMaxBitrate, String videoCodec,
-        boolean videoCodecHwAcceleration, boolean videoFlexfecEnabled, int audioStartBitrate,
-        String audioCodec, boolean noAudioProcessing, boolean aecDump, boolean saveInputAudioToFile,
-        boolean useOpenSLES, boolean disableBuiltInAEC, boolean disableBuiltInAGC,
-        boolean disableBuiltInNS, boolean disableWebRtcAGCAndHPF, boolean enableRtcEventLog,
-        DataChannelParameters dataChannelParameters) {
+                                    int videoWidth, int videoHeight, int videoFps, int videoMaxBitrate, String videoCodec,
+                                    boolean videoCodecHwAcceleration, boolean videoFlexfecEnabled, int audioStartBitrate,
+                                    String audioCodec, boolean noAudioProcessing, boolean aecDump, boolean saveInputAudioToFile,
+                                    boolean useOpenSLES, boolean disableBuiltInAEC, boolean disableBuiltInAGC,
+                                    boolean disableBuiltInNS, boolean disableWebRtcAGCAndHPF, boolean enableRtcEventLog,
+                                    DataChannelParameters dataChannelParameters) {
       this.videoCallEnabled = videoCallEnabled;
       this.loopback = loopback;
       this.tracing = tracing;
@@ -257,50 +276,13 @@ public class PeerConnectionClient {
     }
   }
 
-  // 封装单个 PeerConnection 的状态
-  private static class PeerConnectionHolder {
-    public PeerConnection peerConnection;
-    public SessionDescription localSdp;
-    public List<IceCandidate> queuedRemoteCandidates;
-    public boolean isInitiator;
-    public RtpSender localVideoSender;
-    public VideoTrack remoteVideoTrack;
-    public DataChannel dataChannel;
-    public VideoCapturer videoCapturer;
-    public VideoSource videoSource;
-    public SurfaceTextureHelper surfaceTextureHelper;
-    public boolean videoCapturerStopped = true;
-    public final String connectionId;
-    public boolean isError;
-
-    public PeerConnectionHolder(String connectionId) {
-      this.connectionId = connectionId;
-    }
-  }
-
-  // 修改后的回调接口
-  public interface PeerConnectionEvents {
-    void onLocalOffer(String connectionId, SessionDescription sdp);
-    void onLocalAnswer(String connectionId, SessionDescription sdp);
-    void onIceCandidate(String connectionId, IceCandidate candidate);
-    void onIceCandidatesRemoved(String connectionId, IceCandidate[] candidates);
-    void onIceConnected(String connectionId);
-    void onIceDisconnected(String connectionId);
-    void onConnected(String connectionId);
-    void onDisconnected(String connectionId);
-    void onPeerConnectionClosed(String connectionId);
-    void onPeerConnectionStatsReady(String connectionId, StatsReport[] reports);
-    void onPeerConnectionError(String connectionId, String description);
-  }
-  private final Map<String, PeerConnectionHolder> peerConnections = new ConcurrentHashMap<>();
-  private final PeerConnectionFactory.Options factoryOptions;
-
   /**
    * Create a PeerConnectionClient with the specified parameters. PeerConnectionClient takes
    * ownership of |eglBase|.
    */
   public PeerConnectionClient(Context appContext, EglBase eglBase,
-      PeerConnectionParameters peerConnectionParameters, PeerConnectionEvents events,PeerConnectionFactory.Options factoryOptions) {
+                              PeerConnectionParameters peerConnectionParameters, PeerConnectionEvents events,
+                              PeerConnectionFactory.Options factoryOptions) {
     this.rootEglBase = eglBase;
     this.appContext = appContext;
     this.events = events;
@@ -314,32 +296,22 @@ public class PeerConnectionClient {
     executor.execute(() -> {
       Log.d(TAG, "Initialize WebRTC. Field trials: " + fieldTrials);
       PeerConnectionFactory.initialize(
-          PeerConnectionFactory.InitializationOptions.builder(appContext)
-              .setFieldTrials(fieldTrials)
-              .setEnableInternalTracer(true)
-              .createInitializationOptions());
+              PeerConnectionFactory.InitializationOptions.builder(appContext)
+                      .setFieldTrials(fieldTrials)
+                      .setEnableInternalTracer(true)
+                      .createInitializationOptions());
       // 创建 PeerConnectionFactory
       createPeerConnectionFactoryInternal(factoryOptions);
     });
   }
 
-//  /**
-//   * This function should only be called once.
-//   */
-//  private void createPeerConnectionFactory(PeerConnectionFactory.Options options) {
-//    if (factory != null) {
-//      throw new IllegalStateException("PeerConnectionFactory has already been constructed");
-//    }
-//    executor.execute(() -> createPeerConnectionFactoryInternal(options));
-//  }
-
   public void createPeerConnection(String connectionId, final VideoSink localRender, final VideoSink remoteSink,
-      final VideoCapturer videoCapturer, final APPRTCSignalClient.SignalingParameters signalingParameters) {
+                                   final VideoCapturer videoCapturer, final APPRTCSignalClient.SignalingParameters signalingParameters) {
     if (peerConnectionParameters.videoCallEnabled && videoCapturer == null) {
       Log.w(TAG, "Video call enabled but no video capturer provided.");
     }
     createPeerConnection(connectionId,
-        localRender, Collections.singletonList(remoteSink), videoCapturer, signalingParameters);
+            localRender, Collections.singletonList(remoteSink), videoCapturer, signalingParameters);
   }
 
   public void createPeerConnection(String connectionId,
@@ -385,41 +357,31 @@ public class PeerConnectionClient {
   }
 
   public void close() {
-    executor.execute(this ::closeInternal);
+    executor.execute(() -> {
+      for (String connectionId : new ArrayList<>(peerConnections.keySet())) {
+        closeConnection(connectionId);
+      }
+    });
   }
 
   private boolean isVideoCallEnabled() {
-    return peerConnectionParameters.videoCallEnabled && videoCapturer != null;
+    return peerConnectionParameters.videoCallEnabled;
   }
 
   private void createPeerConnectionFactoryInternal(PeerConnectionFactory.Options options) {
-    isError = false;
+    if (factory != null) {
+      return;
+    }
 
     if (peerConnectionParameters.tracing) {
       PeerConnectionFactory.startInternalTracingCapture(
-          Environment.getExternalStorageDirectory().getAbsolutePath() + File.separator
-          + "webrtc-trace.txt");
+              Environment.getExternalStorageDirectory().getAbsolutePath() + File.separator
+                      + "webrtc-trace.txt");
     }
 
     // Check if ISAC is used by default.
     preferIsac = peerConnectionParameters.audioCodec != null
-        && peerConnectionParameters.audioCodec.equals(AUDIO_CODEC_ISAC);
-
-    // It is possible to save a copy in raw PCM format on a file by checking
-    // the "Save input audio to file" checkbox in the Settings UI. A callback
-    // interface is set when this flag is enabled. As a result, a copy of recorded
-    // audio samples are provided to this client directly from the native audio
-    // layer in Java.
-//    if (peerConnectionParameters.saveInputAudioToFile) {
-//      if (!peerConnectionParameters.useOpenSLES) {
-//        Log.d(TAG, "Enable recording of microphone input audio to file");
-//        saveRecordedAudioToFile = new RecordedAudioToFileController(executor);
-//      } else {
-//        // TODO(henrika): ensure that the UI reflects that if OpenSL ES is selected,
-//        // then the "Save inut audio to file" option shall be grayed out.
-//        Log.e(TAG, "Recording of input audio is not supported for OpenSL ES");
-//      }
-//    }
+            && peerConnectionParameters.audioCodec.equals(AUDIO_CODEC_ISAC);
 
     final AudioDeviceModule adm = createJavaAudioDevice();
 
@@ -428,13 +390,13 @@ public class PeerConnectionClient {
       Log.d(TAG, "Factory networkIgnoreMask option: " + options.networkIgnoreMask);
     }
     final boolean enableH264HighProfile =
-        VIDEO_CODEC_H264_HIGH.equals(peerConnectionParameters.videoCodec);
+            VIDEO_CODEC_H264_HIGH.equals(peerConnectionParameters.videoCodec);
     final VideoEncoderFactory encoderFactory;
     final VideoDecoderFactory decoderFactory;
 
     if (peerConnectionParameters.videoCodecHwAcceleration) {
       encoderFactory = new DefaultVideoEncoderFactory(
-          rootEglBase.getEglBaseContext(), true /* enableIntelVp8Encoder */, enableH264HighProfile);
+              rootEglBase.getEglBaseContext(), true /* enableIntelVp8Encoder */, enableH264HighProfile);
       decoderFactory = new DefaultVideoDecoderFactory(rootEglBase.getEglBaseContext());
     } else {
       encoderFactory = new SoftwareVideoEncoderFactory();
@@ -442,11 +404,11 @@ public class PeerConnectionClient {
     }
 
     factory = PeerConnectionFactory.builder()
-                  .setOptions(options)
-                  .setAudioDeviceModule(adm)
-                  .setVideoEncoderFactory(encoderFactory)
-                  .setVideoDecoderFactory(decoderFactory)
-                  .createPeerConnectionFactory();
+            .setOptions(options)
+            .setAudioDeviceModule(adm)
+            .setVideoEncoderFactory(encoderFactory)
+            .setVideoDecoderFactory(decoderFactory)
+            .createPeerConnectionFactory();
     Log.d(TAG, "Peer connection factory created.");
     adm.release();
   }
@@ -463,20 +425,20 @@ public class PeerConnectionClient {
       @Override
       public void onWebRtcAudioRecordInitError(String errorMessage) {
         Log.e(TAG, "onWebRtcAudioRecordInitError: " + errorMessage);
-        reportError(errorMessage);
+        reportError("", errorMessage);
       }
 
       @Override
       public void onWebRtcAudioRecordStartError(
-          JavaAudioDeviceModule.AudioRecordStartErrorCode errorCode, String errorMessage) {
+              JavaAudioDeviceModule.AudioRecordStartErrorCode errorCode, String errorMessage) {
         Log.e(TAG, "onWebRtcAudioRecordStartError: " + errorCode + ". " + errorMessage);
-        reportError(errorMessage);
+        reportError("", errorMessage);
       }
 
       @Override
       public void onWebRtcAudioRecordError(String errorMessage) {
         Log.e(TAG, "onWebRtcAudioRecordError: " + errorMessage);
-        reportError(errorMessage);
+        reportError("", errorMessage);
       }
     };
 
@@ -484,30 +446,30 @@ public class PeerConnectionClient {
       @Override
       public void onWebRtcAudioTrackInitError(String errorMessage) {
         Log.e(TAG, "onWebRtcAudioTrackInitError: " + errorMessage);
-        reportError(errorMessage);
+        reportError("", errorMessage);
       }
 
       @Override
       public void onWebRtcAudioTrackStartError(
-          JavaAudioDeviceModule.AudioTrackStartErrorCode errorCode, String errorMessage) {
+              JavaAudioDeviceModule.AudioTrackStartErrorCode errorCode, String errorMessage) {
         Log.e(TAG, "onWebRtcAudioTrackStartError: " + errorCode + ". " + errorMessage);
-        reportError(errorMessage);
+        reportError("", errorMessage);
       }
 
       @Override
       public void onWebRtcAudioTrackError(String errorMessage) {
         Log.e(TAG, "onWebRtcAudioTrackError: " + errorMessage);
-        reportError(errorMessage);
+        reportError("", errorMessage);
       }
     };
 
     return JavaAudioDeviceModule.builder(appContext)
-        .setSamplesReadyCallback(null)
-        .setUseHardwareAcousticEchoCanceler(!peerConnectionParameters.disableBuiltInAEC)
-        .setUseHardwareNoiseSuppressor(!peerConnectionParameters.disableBuiltInNS)
-        .setAudioRecordErrorCallback(audioRecordErrorCallback)
-        .setAudioTrackErrorCallback(audioTrackErrorCallback)
-        .createAudioDeviceModule();
+            .setSamplesReadyCallback(null)
+            .setUseHardwareAcousticEchoCanceler(!peerConnectionParameters.disableBuiltInAEC)
+            .setUseHardwareNoiseSuppressor(!peerConnectionParameters.disableBuiltInNS)
+            .setAudioRecordErrorCallback(audioRecordErrorCallback)
+            .setAudioTrackErrorCallback(audioTrackErrorCallback)
+            .createAudioDeviceModule();
   }
 
   private void createMediaConstraintsInternal() {
@@ -536,25 +498,25 @@ public class PeerConnectionClient {
     if (peerConnectionParameters.noAudioProcessing) {
       Log.d(TAG, "Disabling audio processing");
       audioConstraints.mandatory.add(
-          new MediaConstraints.KeyValuePair(AUDIO_ECHO_CANCELLATION_CONSTRAINT, "false"));
+              new MediaConstraints.KeyValuePair(AUDIO_ECHO_CANCELLATION_CONSTRAINT, "false"));
       audioConstraints.mandatory.add(
-          new MediaConstraints.KeyValuePair(AUDIO_AUTO_GAIN_CONTROL_CONSTRAINT, "false"));
+              new MediaConstraints.KeyValuePair(AUDIO_AUTO_GAIN_CONTROL_CONSTRAINT, "false"));
       audioConstraints.mandatory.add(
-          new MediaConstraints.KeyValuePair(AUDIO_HIGH_PASS_FILTER_CONSTRAINT, "false"));
+              new MediaConstraints.KeyValuePair(AUDIO_HIGH_PASS_FILTER_CONSTRAINT, "false"));
       audioConstraints.mandatory.add(
-          new MediaConstraints.KeyValuePair(AUDIO_NOISE_SUPPRESSION_CONSTRAINT, "false"));
+              new MediaConstraints.KeyValuePair(AUDIO_NOISE_SUPPRESSION_CONSTRAINT, "false"));
     }
     // Create SDP constraints.
     sdpMediaConstraints = new MediaConstraints();
     sdpMediaConstraints.mandatory.add(
-        new MediaConstraints.KeyValuePair("OfferToReceiveAudio", "true"));
+            new MediaConstraints.KeyValuePair("OfferToReceiveAudio", "true"));
     sdpMediaConstraints.mandatory.add(new MediaConstraints.KeyValuePair(
-        "OfferToReceiveVideo", Boolean.toString(isVideoCallEnabled())));
+            "OfferToReceiveVideo", Boolean.toString(isVideoCallEnabled())));
   }
 
   private void createPeerConnectionInternal(PeerConnectionHolder holder,
                                             APPRTCSignalClient.SignalingParameters signalingParameters) {
-    if (factory == null ) {
+    if (factory == null) {
       Log.e(TAG, "Peerconnection factory is not created");
       return;
     }
@@ -563,7 +525,7 @@ public class PeerConnectionClient {
     holder.queuedRemoteCandidates = new ArrayList<>();
 
     PeerConnection.RTCConfiguration rtcConfig =
-        new PeerConnection.RTCConfiguration(signalingParameters.iceServers);
+            new PeerConnection.RTCConfiguration(signalingParameters.iceServers);
     // TCP candidates are only useful when connecting to a server that supports
     // ICE-TCP.
     rtcConfig.tcpCandidatePolicy = PeerConnection.TcpCandidatePolicy.DISABLED;
@@ -586,7 +548,7 @@ public class PeerConnectionClient {
       init.maxRetransmitTimeMs = peerConnectionParameters.dataChannelParameters.maxRetransmitTimeMs;
       init.id = peerConnectionParameters.dataChannelParameters.id;
       init.protocol = peerConnectionParameters.dataChannelParameters.protocol;
-      dataChannel = holder.peerConnection.createDataChannel("ApprtcDemo data", init);
+      holder.dataChannel = holder.peerConnection.createDataChannel("ApprtcDemo data", init);
     }
     holder.isInitiator = false;
     // Set INFO libjingle logging.
@@ -594,16 +556,20 @@ public class PeerConnectionClient {
     Logging.enableLogToDebugOutput(Logging.Severity.LS_INFO);
 
     List<String> mediaStreamLabels = Collections.singletonList("ARDAMS");
-    if (isVideoCallEnabled()) {
+    if (isVideoCallEnabled() && holder.videoCapturer != null) {
       VideoTrack videoTrack = createVideoTrack(holder, holder.videoCapturer);
+      localVideoTrack = videoTrack;
       holder.peerConnection.addTrack(videoTrack, mediaStreamLabels);
       holder.remoteVideoTrack = getRemoteVideoTrack(holder.peerConnection);
       if (holder.remoteVideoTrack != null) {
         holder.remoteVideoTrack.setEnabled(renderVideo);
       }
     }
+
     AudioTrack audioTrack = createAudioTrack();
+    holder.localAudioTrack = audioTrack;
     holder.peerConnection.addTrack(audioTrack, mediaStreamLabels);
+
     if (isVideoCallEnabled()) {
       findVideoSender(holder);
     }
@@ -628,19 +594,19 @@ public class PeerConnectionClient {
     Date date = new Date();
     final String outputFileName = "event_log_" + dateFormat.format(date) + ".log";
     return new File(
-        appContext.getDir(RTCEVENTLOG_OUTPUT_DIR_NAME, Context.MODE_PRIVATE), outputFileName);
+            appContext.getDir(RTCEVENTLOG_OUTPUT_DIR_NAME, Context.MODE_PRIVATE), outputFileName);
   }
 
   private void maybeCreateAndStartRtcEventLog(PeerConnectionHolder holder) {
-    if (appContext == null ||holder.peerConnection == null) {
+    if (appContext == null || holder.peerConnection == null) {
       return;
     }
     if (!peerConnectionParameters.enableRtcEventLog) {
       Log.d(TAG, "RtcEventLog is disabled.");
       return;
     }
-    rtcEventLog = new RtcEventLog(holder.peerConnection);
-    rtcEventLog.start(createRtcEventLogOutputFile());
+    holder.rtcEventLog = new RtcEventLog(holder.peerConnection);
+    holder.rtcEventLog.start(createRtcEventLogOutputFile());
   }
 
   public void closeConnection(String connectionId) {
@@ -669,7 +635,9 @@ public class PeerConnectionClient {
     if (holder.videoCapturer != null && !holder.videoCapturerStopped) {
       try {
         holder.videoCapturer.stopCapture();
-      } catch (InterruptedException ignored) {}
+      } catch (InterruptedException ignored) {
+      }
+      holder.videoCapturerStopped = true;
       holder.videoCapturer.dispose();
       holder.videoCapturer = null;
     }
@@ -684,6 +652,26 @@ public class PeerConnectionClient {
       holder.surfaceTextureHelper = null;
     }
 
+    if (holder.audioSource != null) {
+      holder.audioSource.dispose();
+      holder.audioSource = null;
+    }
+
+    if (holder.localAudioTrack != null) {
+      holder.localAudioTrack.dispose();
+      holder.localAudioTrack = null;
+    }
+
+    if (localVideoTrack != null) {
+      localVideoTrack.dispose();
+      localVideoTrack = null;
+    }
+
+    if (holder.rtcEventLog != null) {
+      holder.rtcEventLog.stop();
+      holder.rtcEventLog = null;
+    }
+
     Log.d(TAG, "Peer connection closed: " + holder.connectionId);
   }
 
@@ -692,19 +680,21 @@ public class PeerConnectionClient {
   }
 
   @SuppressWarnings("deprecation") // TODO(sakal): getStats is deprecated.
-  private void getStats() {
-    if (peerConnection == null || isError) {
-      return;
-    }
-    boolean success = peerConnection.getStats(new StatsObserver() {
-      @Override
-      public void onComplete(final StatsReport[] reports) {
-        events.onPeerConnectionStatsReady(reports);
+  private void getStats(String connectionId) {
+    executor.execute(() -> {
+      PeerConnectionHolder holder = peerConnections.get(connectionId);
+      if (holder == null || holder.isError || holder.peerConnection == null) return;
+
+      boolean success = holder.peerConnection.getStats(new StatsObserver() {
+        @Override
+        public void onComplete(final StatsReport[] reports) {
+          events.onPeerConnectionStatsReady(connectionId, reports);
+        }
+      }, null);
+      if (!success) {
+        Log.e(TAG, "getStats() returns false for connection: " + connectionId);
       }
-    }, null);
-    if (!success) {
-      Log.e(TAG, "getStats() returns false!");
-    }
+    });
   }
 
   public void enableStatsEvents(boolean enable, int periodMs) {
@@ -713,7 +703,9 @@ public class PeerConnectionClient {
         statsTimer.schedule(new TimerTask() {
           @Override
           public void run() {
-            executor.execute(() -> getStats());
+            for (String connectionId : peerConnections.keySet()) {
+              getStats(connectionId);
+            }
           }
         }, 0, periodMs);
       } catch (Exception e) {
@@ -724,23 +716,29 @@ public class PeerConnectionClient {
     }
   }
 
-  public void setAudioEnabled(final boolean enable) {
+  public void setAudioEnabled(String connectionId, final boolean enable) {
     executor.execute(() -> {
+      PeerConnectionHolder holder = peerConnections.get(connectionId);
+      if (holder == null) return;
+
       enableAudio = enable;
-      if (localAudioTrack != null) {
-        localAudioTrack.setEnabled(enableAudio);
+      if (holder.localAudioTrack != null) {
+        holder.localAudioTrack.setEnabled(enable);
       }
     });
   }
 
-  public void setVideoEnabled(final boolean enable) {
+  public void setVideoEnabled(String connectionId, final boolean enable) {
     executor.execute(() -> {
+      PeerConnectionHolder holder = peerConnections.get(connectionId);
+      if (holder == null) return;
+
       renderVideo = enable;
       if (localVideoTrack != null) {
         localVideoTrack.setEnabled(renderVideo);
       }
-      if (remoteVideoTrack != null) {
-        remoteVideoTrack.setEnabled(renderVideo);
+      if (holder.remoteVideoTrack != null) {
+        holder.remoteVideoTrack.setEnabled(renderVideo);
       }
     });
   }
@@ -748,7 +746,7 @@ public class PeerConnectionClient {
   public void createOffer(String connectionId) {
     executor.execute(() -> {
       PeerConnectionHolder holder = peerConnections.get(connectionId);
-      if (holder == null || holder.isError) return;
+      if (holder == null || holder.isError || holder.peerConnection == null) return;
 
       Log.d(TAG, "PC Create OFFER for: " + connectionId);
       holder.isInitiator = true;
@@ -762,7 +760,7 @@ public class PeerConnectionClient {
   public void createAnswer(String connectionId) {
     executor.execute(() -> {
       PeerConnectionHolder holder = peerConnections.get(connectionId);
-      if (holder == null || holder.isError) return;
+      if (holder == null || holder.isError || holder.peerConnection == null) return;
 
       Log.d(TAG, "PC create ANSWER for: " + connectionId);
       holder.isInitiator = false;
@@ -776,10 +774,21 @@ public class PeerConnectionClient {
   public void setRemoteDescription(String connectionId, final SessionDescription sdp) {
     executor.execute(() -> {
       PeerConnectionHolder holder = peerConnections.get(connectionId);
-      if (holder == null || holder.isError) return;
+      if (holder == null || holder.isError || holder.peerConnection == null) return;
 
-      // ... SDP 处理逻辑保持不变 ...
-
+      String sdpDescription = sdp.description;
+      if (preferIsac) {
+        sdpDescription = preferCodec(sdpDescription, AUDIO_CODEC_ISAC, true);
+      }
+      if (isVideoCallEnabled()) {
+        sdpDescription =
+                preferCodec(sdpDescription, getSdpVideoCodecName(peerConnectionParameters), false);
+      }
+      if (peerConnectionParameters.audioStartBitrate > 0) {
+        sdpDescription = setStartBitrate(
+                AUDIO_CODEC_OPUS, false, sdpDescription, peerConnectionParameters.audioStartBitrate);
+      }
+      Log.d(TAG, "Set remote SDP for: " + connectionId);
       SessionDescription sdpRemote = new SessionDescription(sdp.type, sdpDescription);
       holder.peerConnection.setRemoteDescription(
               new SDPObserver(connectionId, null), sdpRemote);
@@ -789,7 +798,7 @@ public class PeerConnectionClient {
   public void addRemoteIceCandidate(String connectionId, final IceCandidate candidate) {
     executor.execute(() -> {
       PeerConnectionHolder holder = peerConnections.get(connectionId);
-      if (holder == null || holder.isError) return;
+      if (holder == null || holder.isError || holder.peerConnection == null) return;
 
       if (holder.queuedRemoteCandidates != null) {
         holder.queuedRemoteCandidates.add(candidate);
@@ -799,79 +808,60 @@ public class PeerConnectionClient {
     });
   }
 
-
-  public void removeRemoteIceCandidates(final IceCandidate[] candidates) {
+  public void removeRemoteIceCandidates(String connectionId, final IceCandidate[] candidates) {
     executor.execute(() -> {
-      if (peerConnection == null || isError) {
-        return;
-      }
-      // Drain the queued remote candidates if there is any so that
-      // they are processed in the proper order.
-      drainCandidates();
-      peerConnection.removeIceCandidates(candidates);
+      PeerConnectionHolder holder = peerConnections.get(connectionId);
+      if (holder == null || holder.isError || holder.peerConnection == null) return;
+
+      drainCandidates(holder);
+      holder.peerConnection.removeIceCandidates(candidates);
     });
   }
 
-  public void setRemoteDescription(final SessionDescription sdp) {
+  public void stopVideoSource(String connectionId) {
     executor.execute(() -> {
-      if (peerConnection == null || isError) {
-        return;
-      }
-      String sdpDescription = sdp.description;
-      if (preferIsac) {
-        sdpDescription = preferCodec(sdpDescription, AUDIO_CODEC_ISAC, true);
-      }
-      if (isVideoCallEnabled()) {
-        sdpDescription =
-            preferCodec(sdpDescription, getSdpVideoCodecName(peerConnectionParameters), false);
-      }
-      if (peerConnectionParameters.audioStartBitrate > 0) {
-        sdpDescription = setStartBitrate(
-            AUDIO_CODEC_OPUS, false, sdpDescription, peerConnectionParameters.audioStartBitrate);
-      }
-      Log.d(TAG, "Set remote SDP.");
-      SessionDescription sdpRemote = new SessionDescription(sdp.type, sdpDescription);
-      peerConnection.setRemoteDescription(sdpObserver, sdpRemote);
-    });
-  }
+      PeerConnectionHolder holder = peerConnections.get(connectionId);
+      if (holder == null) return;
 
-  public void stopVideoSource() {
-    executor.execute(() -> {
-      if (videoCapturer != null && !videoCapturerStopped) {
-        Log.d(TAG, "Stop video source.");
+      if (holder.videoCapturer != null && !holder.videoCapturerStopped) {
+        Log.d(TAG, "Stop video source for: " + connectionId);
         try {
-          videoCapturer.stopCapture();
+          holder.videoCapturer.stopCapture();
         } catch (InterruptedException e) {
         }
-        videoCapturerStopped = true;
+        holder.videoCapturerStopped = true;
       }
     });
   }
 
-  public void startVideoSource() {
+  public void startVideoSource(String connectionId) {
     executor.execute(() -> {
-      if (videoCapturer != null && videoCapturerStopped) {
-        Log.d(TAG, "Restart video source.");
-        videoCapturer.startCapture(videoWidth, videoHeight, videoFps);
-        videoCapturerStopped = false;
+      PeerConnectionHolder holder = peerConnections.get(connectionId);
+      if (holder == null) return;
+
+      if (holder.videoCapturer != null && holder.videoCapturerStopped) {
+        Log.d(TAG, "Restart video source for: " + connectionId);
+        holder.videoCapturer.startCapture(videoWidth, videoHeight, videoFps);
+        holder.videoCapturerStopped = false;
       }
     });
   }
 
-  public void setVideoMaxBitrate(@Nullable final Integer maxBitrateKbps) {
+  public void setVideoMaxBitrate(String connectionId, @Nullable final Integer maxBitrateKbps) {
     executor.execute(() -> {
-      if (peerConnection == null || localVideoSender == null || isError) {
+      PeerConnectionHolder holder = peerConnections.get(connectionId);
+      if (holder == null || holder.isError || holder.peerConnection == null) {
         return;
       }
-      Log.d(TAG, "Requested max video bitrate: " + maxBitrateKbps);
-      if (localVideoSender == null) {
-        Log.w(TAG, "Sender is not ready.");
+      Log.d(TAG, "Requested max video bitrate for " + connectionId + ": " + maxBitrateKbps);
+      if (holder.localVideoSender == null) {
+        Log.w(TAG, "Sender is not ready for: " + connectionId);
         return;
       }
 
-      RtpParameters parameters = localVideoSender.getParameters();
+      RtpParameters parameters = holder.localVideoSender.getParameters();
       if (parameters.encodings.size() == 0) {
-        Log.w(TAG, "RtpParameters are not ready.");
+        Log.w(TAG, "RtpParameters are not ready for: " + connectionId);
         return;
       }
 
@@ -879,10 +869,10 @@ public class PeerConnectionClient {
         // Null value means no limit.
         encoding.maxBitrateBps = maxBitrateKbps == null ? null : maxBitrateKbps * BPS_IN_KBPS;
       }
-      if (!localVideoSender.setParameters(parameters)) {
-        Log.e(TAG, "RtpSender.setParameters failed.");
+      if (!holder.localVideoSender.setParameters(parameters)) {
+        Log.e(TAG, "RtpSender.setParameters failed for: " + connectionId);
       }
-      Log.d(TAG, "Configured max video bitrate to: " + maxBitrateKbps);
+      Log.d(TAG, "Configured max video bitrate to " + maxBitrateKbps + " for: " + connectionId);
     });
   }
 
@@ -897,36 +887,39 @@ public class PeerConnectionClient {
     });
   }
 
-
   @Nullable
   private AudioTrack createAudioTrack() {
-    audioSource = factory.createAudioSource(audioConstraints);
-    localAudioTrack = factory.createAudioTrack(AUDIO_TRACK_ID, audioSource);
-    localAudioTrack.setEnabled(enableAudio);
-    return localAudioTrack;
+    if (factory == null) return null;
+
+    AudioSource audioSource = factory.createAudioSource(audioConstraints);
+    AudioTrack audioTrack = factory.createAudioTrack(AUDIO_TRACK_ID, audioSource);
+    audioTrack.setEnabled(enableAudio);
+    return audioTrack;
   }
 
   @Nullable
   private VideoTrack createVideoTrack(PeerConnectionHolder holder, VideoCapturer capturer) {
+    if (factory == null) return null;
+
     holder.surfaceTextureHelper =
             SurfaceTextureHelper.create("CaptureThread-" + holder.connectionId,
                     rootEglBase.getEglBaseContext());
-      assert factory != null;
-      holder.videoSource = factory.createVideoSource(capturer.isScreencast());
+    holder.videoSource = factory.createVideoSource(capturer.isScreencast());
     capturer.initialize(holder.surfaceTextureHelper, appContext,
             holder.videoSource.getCapturerObserver());
     capturer.startCapture(videoWidth, videoHeight, videoFps);
     holder.videoCapturerStopped = false;
 
-    VideoTrack videoTrack = factory.createVideoTrack(VIDEO_TRACK_ID, holder.videoSource);
-    videoTrack.setEnabled(renderVideo);
-    return videoTrack;
+    return factory.createVideoTrack(VIDEO_TRACK_ID, holder.videoSource);
   }
 
   private void findVideoSender(PeerConnectionHolder holder) {
+    if (holder.peerConnection == null) return;
+
     for (RtpSender sender : holder.peerConnection.getSenders()) {
       if (sender.track() != null && sender.track().kind().equals(VIDEO_TRACK_TYPE)) {
         holder.localVideoSender = sender;
+        Log.d(TAG, "Found video sender for: " + holder.connectionId);
         break;
       }
     }
@@ -972,7 +965,7 @@ public class PeerConnectionClient {
 
   @SuppressWarnings("StringSplitter")
   private static String setStartBitrate(
-      String codec, boolean isVideoCodec, String sdpDescription, int bitrateKbps) {
+          String codec, boolean isVideoCodec, String sdpDescription, int bitrateKbps) {
     String[] lines = sdpDescription.split("\r\n");
     int rtpmapLineIndex = -1;
     boolean sdpFormatUpdated = false;
@@ -1022,10 +1015,10 @@ public class PeerConnectionClient {
         String bitrateSet;
         if (isVideoCodec) {
           bitrateSet =
-              "a=fmtp:" + codecRtpMap + " " + VIDEO_CODEC_PARAM_START_BITRATE + "=" + bitrateKbps;
+                  "a=fmtp:" + codecRtpMap + " " + VIDEO_CODEC_PARAM_START_BITRATE + "=" + bitrateKbps;
         } else {
           bitrateSet = "a=fmtp:" + codecRtpMap + " " + AUDIO_CODEC_PARAM_BITRATE + "="
-              + (bitrateKbps * 1000);
+                  + (bitrateKbps * 1000);
         }
         Log.d(TAG, "Add remote SDP line: " + bitrateSet);
         newSdpDescription.append(bitrateSet).append("\r\n");
@@ -1046,7 +1039,7 @@ public class PeerConnectionClient {
   }
 
   private static String joinString(
-      Iterable<? extends CharSequence> s, String delimiter, boolean delimiterAtEnd) {
+          Iterable<? extends CharSequence> s, String delimiter, boolean delimiterAtEnd) {
     Iterator<? extends CharSequence> iter = s.iterator();
     if (!iter.hasNext()) {
       return "";
@@ -1061,8 +1054,9 @@ public class PeerConnectionClient {
     return buffer.toString();
   }
 
-  private static @Nullable String movePayloadTypesToFront(
-      List<String> preferredPayloadTypes, String mLine) {
+  private static @Nullable
+  String movePayloadTypesToFront(
+          List<String> preferredPayloadTypes, String mLine) {
     // The format of the media description line should be: m=<media> <port> <proto> <fmt> ...
     final List<String> origLineParts = Arrays.asList(mLine.split(" "));
     if (origLineParts.size() <= 3) {
@@ -1071,7 +1065,7 @@ public class PeerConnectionClient {
     }
     final List<String> header = origLineParts.subList(0, 3);
     final List<String> unpreferredPayloadTypes =
-        new ArrayList<>(origLineParts.subList(3, origLineParts.size()));
+            new ArrayList<>(origLineParts.subList(3, origLineParts.size()));
     unpreferredPayloadTypes.removeAll(preferredPayloadTypes);
     // Reconstruct the line with |preferredPayloadTypes| moved to the beginning of the payload
     // types.
@@ -1116,45 +1110,49 @@ public class PeerConnectionClient {
 
   // 辅助方法
   private void drainCandidates(PeerConnectionHolder holder) {
-    if (holder.queuedRemoteCandidates != null) {
+    if (holder.queuedRemoteCandidates != null && holder.peerConnection != null) {
+      Log.d(TAG, "Draining queued ICE candidates for: " + holder.connectionId);
       for (IceCandidate candidate : holder.queuedRemoteCandidates) {
         holder.peerConnection.addIceCandidate(candidate);
       }
       holder.queuedRemoteCandidates = null;
     }
+  }
 
-  private void switchCameraInternal() {
-    if (videoCapturer instanceof CameraVideoCapturer) {
-      if (!isVideoCallEnabled() || isError) {
-        Log.e(TAG,
-            "Failed to switch camera. Video: " + isVideoCallEnabled() + ". Error : " + isError);
-        return; // No video is sent or only one camera is available or error happened.
+  public void switchCamera(String connectionId) {
+    executor.execute(() -> {
+      PeerConnectionHolder holder = peerConnections.get(connectionId);
+      if (holder == null) return;
+
+      if (holder.videoCapturer instanceof CameraVideoCapturer) {
+        if (!isVideoCallEnabled() || holder.isError) {
+          Log.e(TAG,
+                  "Failed to switch camera. Video: " + isVideoCallEnabled() + ". Error : " + holder.isError);
+          return;
+        }
+        Log.d(TAG, "Switch camera for: " + connectionId);
+        CameraVideoCapturer cameraVideoCapturer = (CameraVideoCapturer) holder.videoCapturer;
+        cameraVideoCapturer.switchCamera(null);
+      } else {
+        Log.d(TAG, "Will not switch camera, video capturer is not a camera for: " + connectionId);
       }
-      Log.d(TAG, "Switch camera");
-      CameraVideoCapturer cameraVideoCapturer = (CameraVideoCapturer) videoCapturer;
-      cameraVideoCapturer.switchCamera(null);
-    } else {
-      Log.d(TAG, "Will not switch camera, video caputurer is not a camera");
-    }
+    });
   }
 
-  public void switchCamera() {
-    executor.execute(this ::switchCameraInternal);
-  }
+  public void changeCaptureFormat(String connectionId, final int width, final int height, final int framerate) {
+    executor.execute(() -> {
+      PeerConnectionHolder holder = peerConnections.get(connectionId);
+      if (holder == null) return;
 
-  public void changeCaptureFormat(final int width, final int height, final int framerate) {
-    executor.execute(() -> changeCaptureFormatInternal(width, height, framerate));
-  }
-
-  private void changeCaptureFormatInternal(int width, int height, int framerate) {
-    if (!isVideoCallEnabled() || isError || videoCapturer == null) {
-      Log.e(TAG,
-          "Failed to change capture format. Video: " + isVideoCallEnabled()
-              + ". Error : " + isError);
-      return;
-    }
-    Log.d(TAG, "changeCaptureFormat: " + width + "x" + height + "@" + framerate);
-    videoSource.adaptOutputFormat(width, height, framerate);
+      if (!isVideoCallEnabled() || holder.isError || holder.videoCapturer == null) {
+        Log.e(TAG,
+                "Failed to change capture format. Video: " + isVideoCallEnabled()
+                        + ". Error : " + holder.isError);
+        return;
+      }
+      Log.d(TAG, "changeCaptureFormat: " + width + "x" + height + "@" + framerate + " for: " + connectionId);
+      holder.videoSource.adaptOutputFormat(width, height, framerate);
+    });
   }
 
   // Implementation detail: observe ICE & stream changes and react accordingly.
@@ -1164,6 +1162,7 @@ public class PeerConnectionClient {
     public PCObserver(String connectionId) {
       this.connectionId = connectionId;
     }
+
     @Override
     public void onIceCandidate(final IceCandidate candidate) {
       events.onIceCandidate(connectionId, candidate);
@@ -1175,45 +1174,57 @@ public class PeerConnectionClient {
     }
 
     @Override
-    public void onIceConnectionChange(final IceConnectionState newState) {
-      if (newState == IceConnectionState.CONNECTED) {
-        events.onIceConnected(connectionId);
-      } else if (newState == IceConnectionState.DISCONNECTED) {
-        events.onIceDisconnected(connectionId);
-      } else if (newState == IceConnectionState.FAILED) {
-        reportError(connectionId, "ICE connection failed.");
-      }
+    public void onSignalingChange(PeerConnection.SignalingState signalingState) {
+
     }
 
     @Override
-    public void onConnectionChange(final PeerConnectionState newState) {
-      if (newState == PeerConnectionState.CONNECTED) {
-        events.onConnected(connectionId);
-      } else if (newState == PeerConnectionState.DISCONNECTED) {
-        events.onDisconnected(connectionId);
-      } else if (newState == PeerConnectionState.FAILED) {
-        reportError(connectionId, "DTLS connection failed.");
-      }
+    public void onIceConnectionChange(final PeerConnection.IceConnectionState newState) {
+      executor.execute(() -> {
+        if (newState == IceConnectionState.CONNECTED) {
+          events.onIceConnected(connectionId);
+        } else if (newState == IceConnectionState.DISCONNECTED) {
+          events.onIceDisconnected(connectionId);
+        } else if (newState == IceConnectionState.FAILED) {
+          reportError(connectionId, "ICE connection failed.");
+        }
+      });
     }
+
+    @Override
+    public void onConnectionChange(final PeerConnection.PeerConnectionState newState) {
+      executor.execute(() -> {
+        if (newState == PeerConnectionState.CONNECTED) {
+          events.onConnected(connectionId);
+        } else if (newState == PeerConnectionState.DISCONNECTED) {
+          events.onDisconnected(connectionId);
+        } else if (newState == PeerConnectionState.FAILED) {
+          reportError(connectionId, "DTLS connection failed.");
+        }
+      });
+    }
+
     @Override
     public void onIceGatheringChange(PeerConnection.IceGatheringState newState) {
-      Log.d(TAG, "IceGatheringState: " + newState);
+      Log.d(TAG, "IceGatheringState for " + connectionId + ": " + newState);
     }
 
     @Override
     public void onIceConnectionReceivingChange(boolean receiving) {
-      Log.d(TAG, "IceConnectionReceiving changed to " + receiving);
+      Log.d(TAG, "IceConnectionReceiving for " + connectionId + " changed to " + receiving);
     }
 
     @Override
-    public void onAddStream(final MediaStream stream) {}
+    public void onAddStream(final MediaStream stream) {
+    }
 
     @Override
-    public void onRemoveStream(final MediaStream stream) {}
+    public void onRemoveStream(final MediaStream stream) {
+    }
 
     @Override
     public void onDataChannel(final DataChannel dc) {
-      Log.d(TAG, "New Data channel " + dc.label());
+      Log.d(TAG, "New Data channel " + dc.label() + " for: " + connectionId);
 
       if (!dataChannelEnabled)
         return;
@@ -1251,7 +1262,18 @@ public class PeerConnectionClient {
     }
 
     @Override
-    public void onAddTrack(final RtpReceiver receiver, final MediaStream[] mediaStreams) {}
+    public void onAddTrack(final RtpReceiver receiver, final MediaStream[] mediaStreams) {
+      PeerConnectionHolder holder = peerConnections.get(connectionId);
+      if (holder == null) return;
+      if (holder.remoteVideoTrack == null){
+        Log.d(TAG, "Add remote video track for: " + connectionId);
+        // 判断是不是视频的track
+        if (receiver.track() instanceof VideoTrack) { 
+          holder.remoteVideoTrack = (VideoTrack) receiver.track();
+        }
+
+      }
+    }
   }
 
   // Implementation detail: handle offer creation/signaling and answer setting,
@@ -1274,7 +1296,18 @@ public class PeerConnectionClient {
         return;
       }
 
-      // ... SDP 优化处理 ...
+      String sdpDescription = origSdp.description;
+      if (preferIsac) {
+        sdpDescription = preferCodec(sdpDescription, AUDIO_CODEC_ISAC, true);
+      }
+      if (isVideoCallEnabled()) {
+        sdpDescription =
+                preferCodec(sdpDescription, getSdpVideoCodecName(peerConnectionParameters), false);
+      }
+      if (peerConnectionParameters.audioStartBitrate > 0) {
+        sdpDescription = setStartBitrate(
+                AUDIO_CODEC_OPUS, false, sdpDescription, peerConnectionParameters.audioStartBitrate);
+      }
 
       final SessionDescription sdp = new SessionDescription(origSdp.type, sdpDescription);
       holder.localSdp = sdp;
@@ -1288,6 +1321,7 @@ public class PeerConnectionClient {
 
       executor.execute(() -> {
         if (holder.peerConnection != null && !holder.isError) {
+          Log.d(TAG, "Set local SDP for: " + connectionId);
           holder.peerConnection.setLocalDescription(this, sdp);
         }
       });

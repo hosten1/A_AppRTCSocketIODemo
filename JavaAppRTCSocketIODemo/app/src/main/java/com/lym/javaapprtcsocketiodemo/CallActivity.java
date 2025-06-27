@@ -67,6 +67,10 @@ public class CallActivity extends AppCompatActivity {
     // Peer connection statistics callback period in ms.
     private static final int STAT_CALLBACK_PERIOD = 1000;
 
+    private static final String single_peer_id = "1111";
+
+
+
     // 添加工具栏变量
     private Toolbar toolbar;
     private ImageButton backButton;
@@ -273,16 +277,15 @@ public class CallActivity extends AppCompatActivity {
         } catch (URISyntaxException e) {
             e.printStackTrace();
         }
+        PeerConnectionFactory.Options options = new PeerConnectionFactory.Options();
         // Create peer connection client.
         peerConnectionClient = new PeerConnectionClient(
-                getApplicationContext(), eglBase, peerConnectionParameters, mEvent);
-        PeerConnectionFactory.Options options = new PeerConnectionFactory.Options();
+                getApplicationContext(), eglBase, peerConnectionParameters, mEvent,options);
+
 //        如果是本地回环需要把networkIgnoreMask标记成0
 //        if (loopback) {
 //            options.networkIgnoreMask = 0;
 //        }
-//        根据option 创建Factory
-        peerConnectionClient.createPeerConnectionFactory(options);
 
         startCall();
     }
