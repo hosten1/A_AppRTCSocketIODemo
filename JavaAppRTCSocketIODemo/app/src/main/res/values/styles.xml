@@ -1,20 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <!-- Base application theme. -->
+    <!-- 基础应用主题 -->
     <style name="AppTheme" parent="Theme.AppCompat.Light.DarkActionBar">
-        <!-- Customize your theme here. -->
+        <!-- 状态栏颜色 -->
         <item name="colorPrimary">@color/colorPrimary</item>
+        <!-- 状态栏深色 -->
         <item name="colorPrimaryDark">@color/colorPrimaryDark</item>
+        <!-- 强调色 -->
         <item name="colorAccent">@color/colorAccent</item>
+        <!-- 工具栏样式 -->
+        <item name="toolbarStyle">@style/MyToolbarStyle</item>
     </style>
 
-    <style name="AppTheme.NoActionBar">
-        <item name="windowActionBar">false</item>
-        <item name="windowNoTitle">true</item>
+    <!-- 自定义工具栏样式 -->
+    <style name="MyToolbarStyle" parent="Widget.AppCompat.Toolbar">
+        <!-- 工具栏背景色 -->
+        <item name="android:background">?attr/colorPrimary</item>
+        <!-- 标题样式 -->
+        <item name="titleTextAppearance">@style/ToolbarTitle</item>
     </style>
 
-    <style name="AppTheme.AppBarOverlay" parent="ThemeOverlay.AppCompat.Dark.ActionBar" />
-
-    <style name="AppTheme.PopupOverlay" parent="ThemeOverlay.AppCompat.Light" />
-
+    <!-- 工具栏标题文本样式 -->
+    <style name="ToolbarTitle" parent="TextAppearance.AppCompat.Widget.ActionBar.Title">
+        <!-- 标题文字大小 -->
+        <item name="android:textSize">18sp</item>
+        <!-- 标题文字颜色 -->
+        <item name="android:textColor">@android:color/white</item>
+    </style>
+    <!-- 添加按钮样式 -->
+    <style name="CallControlButton">
+        <item name="android:layout_width">56dp</item>
+        <item name="android:layout_height">56dp</item>
+        <item name="android:background">@drawable/btn_circle_bg</item>
+        <item name="android:elevation">4dp</item>
+        <item name="android:contentDescription">按钮描述</item>
+    </style>
 </resources>

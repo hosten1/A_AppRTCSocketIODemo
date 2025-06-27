@@ -231,9 +231,9 @@ public class SocketManager {
             public void call(Object... args) {
                 try {
                     JSONObject msg = (JSONObject) args[0];
-                    String roomName = msg.getString("room");
+                    String roomName = msg.getString("roomId");
                     String userId = msg.getString("id");
-                    Log.e(TAG, "Received joined msg = " + args.toString());
+                    Log.e(TAG, "Received joined msg = " + msg.toString());
                     if (mListener != null) {
                         mListener.onUserJoined(roomName, userId);
                     }
@@ -383,7 +383,7 @@ public class SocketManager {
         if (mSocket == null) {
             return;
         }
-        mSocket.emit("message", mRoomName, message, new Ack() {
+        mSocket.emit("message", message, new Ack() {
             @Override
             public void call(Object... args) {
                 Log.i(TAG,"recv ack msg："+args[0].toString());

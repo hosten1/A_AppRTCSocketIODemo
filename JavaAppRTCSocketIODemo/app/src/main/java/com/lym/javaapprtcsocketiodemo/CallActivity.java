@@ -13,9 +13,12 @@ import android.media.projection.MediaProjection;
 import android.media.projection.MediaProjectionManager;
 import android.os.Bundle;
 import android.util.Log;
+import android.view.MenuItem;
 import android.view.View;
+import android.widget.ImageButton;
 import android.widget.TextView;
 import android.widget.Toast;
+import android.widget.Toolbar;
 
 import com.lym.Signal.SocketManager;
 
@@ -63,6 +66,10 @@ public class CallActivity extends AppCompatActivity {
     public static final boolean EXTRA_ORDERED = true;
     // Peer connection statistics callback period in ms.
     private static final int STAT_CALLBACK_PERIOD = 1000;
+
+    // 添加工具栏变量
+    private Toolbar toolbar;
+    private ImageButton backButton;
     // 处理线程异常导致崩溃
     class ExceptionHandler implements Thread.UncaughtExceptionHandler {
 
@@ -133,9 +140,20 @@ public class CallActivity extends AppCompatActivity {
 //    private HudFragment hudFragment;
 //    private CpuMonitor cpuMonitor;
     private  String selfId = "";
+    private  String roomId = "";
 //     换存candidate信息
     private List<IceCandidate> candidateObjList;
     private boolean haveSetRemoteSdp = false;
+    // 控制按钮
+    private ImageButton btnSpeaker;
+    private ImageButton btnMute;
+    private ImageButton btnEndCall;
+    private ImageButton btnSwitchCamera;
+
+    // 状态变量
+    private boolean isSpeakerOn = true;
+    private boolean isMuted = false;
+
 
 
     @Override
@@ -149,8 +167,23 @@ public class CallActivity extends AppCompatActivity {
 //                | LayoutParams.FLAG_SHOW_WHEN_LOCKED | LayoutParams.FLAG_TURN_SCREEN_ON);
 //        getWindow().getDecorView().setSystemUiVisibility(getSystemUiVisibility());
         setContentView(R.layout.activity_call);
+        // 初始化工具栏
+        // 初始化右上角返回按钮
+        backButton = findViewById(R.id.backButton);
+        backButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                onBackPressed(); // 调用返回逻辑
+            }
+        });
 
-
+        // 添加导航栏和返回按钮
+        if (getSupportActionBar() != null) {
+            getSupportActionBar().setDisplayHomeAsUpEnabled(true);
+            getSupportActionBar().setDisplayShowTitleEnabled(false); // 隐藏默认标题
+        }
+        // 初始化底部控制栏按钮
+        initCallControls();
         connected = false;
         signalingParameters = null;
         // 初始化换存消息的接口
@@ -233,6 +266,7 @@ public class CallActivity extends AppCompatActivity {
         String serverAddr = intent.getStringExtra("ServerAddr");
         serverAddr = "https://"+serverAddr;
         String roomName =   intent.getStringExtra("RoomName");
+        this.roomId = roomName;
         try {
             // 加入房间
             SocketManager.getInstance().joinRoom(serverAddr, roomName);
@@ -251,6 +285,22 @@ public class CallActivity extends AppCompatActivity {
         peerConnectionClient.createPeerConnectionFactory(options);
 
         startCall();
+    }
+    // 处理左上角返回按钮
+    @Override
+    public boolean onOptionsItemSelected(MenuItem item) {
+        if (item.getItemId() == android.R.id.home) {
+            onBackPressed();
+            return true;
+        }
+        return super.onOptionsItemSelected(item);
+    }
+
+    @Override
+    public void onBackPressed() {
+        // 断开连接并关闭 Activity
+        disconnect();
+        super.onBackPressed();
     }
     @Override
     protected void onResume() {
@@ -327,6 +377,69 @@ public class CallActivity extends AppCompatActivity {
 //        }
 //        return micEnabled;
 //    }
+private void initCallControls() {
+    btnSpeaker = findViewById(R.id.btn_speaker);
+    btnMute = findViewById(R.id.btn_mute);
+    btnEndCall = findViewById(R.id.btn_end_call);
+    btnSwitchCamera = findViewById(R.id.btn_switch_camera);
+
+    // 设置按钮点击事件
+    btnSpeaker.setOnClickListener(v -> toggleSpeaker());
+    btnMute.setOnClickListener(v -> toggleMute());
+    btnEndCall.setOnClickListener(v -> endCall());
+    btnSwitchCamera.setOnClickListener(v -> switchCamera());
+}
+
+    // 切换扬声器/听筒模式
+    private void toggleSpeaker() {
+        isSpeakerOn = !isSpeakerOn;
+        if (audioManager != null) {
+            if (!isSpeakerOn){
+                audioManager.selectAudioDevice(AppRTCAudioManager.AudioDevice.SPEAKER_PHONE);
+            }else {
+                audioManager.selectAudioDevice(AppRTCAudioManager.AudioDevice.EARPIECE);
+            }
+        }
+
+        // 更新图标
+        btnSpeaker.setImageResource(isSpeakerOn ?
+                R.drawable.ic_speaker : R.drawable.ic_speaker_off);
+
+        logAndToast(isSpeakerOn ? "扬声器已启用" : "听筒模式已启用");
+    }
+
+    // 切换静音状态
+    private void toggleMute() {
+        isMuted = !isMuted;
+        if (peerConnectionClient != null) {
+            peerConnectionClient.setAudioEnabled(!isMuted);
+        }
+
+        // 更新图标
+        btnMute.setImageResource(isMuted ?
+                R.drawable.ic_mic_off : R.drawable.ic_mic);
+
+        logAndToast(isMuted ? "麦克风已静音" : "麦克风已启用");
+    }
+
+    // 结束通话
+    private void endCall() {
+        new AlertDialog.Builder(this)
+                .setTitle("结束通话")
+                .setMessage("确定要结束通话吗？")
+                .setPositiveButton("结束", (dialog, which) -> disconnect())
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    // 切换摄像头
+    private void switchCamera() {
+        if (peerConnectionClient != null) {
+            peerConnectionClient.switchCamera();
+            logAndToast("正在切换摄像头...");
+        }
+    }
+    // 添加返回按钮处理
     @TargetApi(21)
     private void startScreenCapture() {
         MediaProjectionManager mediaProjectionManager =
@@ -379,7 +492,6 @@ public class CallActivity extends AppCompatActivity {
         activityRunning = false;
         remoteProxyRenderer.setTarget(null);
         localProxyVideoSink.setTarget(null);
-        SocketManager.getInstance().close();
         if (candidateObjList.size() > 0){
             candidateObjList.clear();
             candidateObjList = null;
@@ -411,6 +523,7 @@ public class CallActivity extends AppCompatActivity {
         }
 //        调用系统的方法结束 activity
         finish();
+        SocketManager.getInstance().close();
     }
     private @Nullable
     VideoCapturer createVideoCapturer() {
@@ -511,6 +624,8 @@ public class CallActivity extends AppCompatActivity {
         try {
             JSONObject message = new JSONObject();
             message.put("type", 2);
+            message.put("roomId",  roomId);
+            message.put("id", selfId);
             JSONObject data = new JSONObject();
             data.put("sdpMLineIndex", iceCandidate.sdpMLineIndex);
             data.put("sdpMid", iceCandidate.sdpMid);
@@ -529,6 +644,8 @@ public class CallActivity extends AppCompatActivity {
         try {
             JSONObject message = new JSONObject();
             message.put("type",  isOffer?0:1);
+            message.put("roomId",  roomId);
+            message.put("id", selfId);
             JSONObject data = new JSONObject();
             data.put("sdp",sdp);
             data.put("type",sdpType);
@@ -573,8 +690,8 @@ public class CallActivity extends AppCompatActivity {
     private LinkedList<PeerConnection.IceServer> getIceSerVerList(){
         LinkedList<PeerConnection.IceServer> iceServers = new LinkedList<PeerConnection.IceServer>();
         PeerConnection.IceServer ice_server =
-                PeerConnection.IceServer.builder("turn:www.lymggylove.top:3478")
-                        .setPassword("123456")
+                PeerConnection.IceServer.builder("stun:8.137.17.218:3478")
+                        .setPassword("lym123456")
                         .setUsername("lym")
                         .createIceServer();
         iceServers.add(ice_server);

@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/controls_container"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:background="#80000000"
+    android:gravity="center"
+    android:padding="16dp">
+
+    <!-- 外放/听筒切换按钮 -->
+    <ImageButton
+        android:id="@+id/btn_speaker"
+        android:layout_width="56dp"
+        android:layout_height="56dp"
+        android:src="@drawable/ic_speaker"
+        android:background="@drawable/btn_circle_bg"
+        android:contentDescription="扬声器切换"
+        android:scaleType="centerInside"
+        app:tint="#FFFFFF" />
+
+    <!-- 静音按钮 -->
+    <ImageButton
+        android:id="@+id/btn_mute"
+        android:layout_width="56dp"
+        android:layout_height="56dp"
+        android:src="@drawable/ic_mic"
+        android:background="@drawable/btn_circle_bg"
+        android:contentDescription="静音"
+        android:layout_marginStart="24dp"
+        android:scaleType="centerInside"
+        app:tint="#FFFFFF" />
+
+    <!-- 结束通话按钮 -->
+    <ImageButton
+        android:id="@+id/btn_end_call"
+        android:layout_width="64dp"
+        android:layout_height="64dp"
+        android:src="@drawable/ic_end_call"
+        android:background="@drawable/btn_circle_bg_red"
+        android:contentDescription="结束通话"
+        android:layout_marginStart="24dp"
+        android:layout_marginEnd="24dp"
+        android:scaleType="centerInside"
+        app:tint="#FFFFFF" />
+
+    <!-- 切换摄像头按钮 -->
+    <ImageButton
+        android:id="@+id/btn_switch_camera"
+        android:layout_width="56dp"
+        android:layout_height="56dp"
+        android:src="@drawable/ic_switch_camera"
+        android:background="@drawable/btn_circle_bg"
+        android:contentDescription="切换摄像头"
+        android:layout_marginEnd="24dp"
+        android:scaleType="centerInside"
+        app:tint="#FFFFFF" />
+</LinearLayout>

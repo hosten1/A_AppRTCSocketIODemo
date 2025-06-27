@@ -5,6 +5,18 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     tools:ignore="MergeRootFrame">
+    <!-- 右上角返回按钮 -->
+    <ImageButton
+        android:id="@+id/backButton"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|end"
+        android:src="@drawable/ic_close"
+        android:background="?attr/selectableItemBackgroundBorderless"
+        android:padding="16dp"
+        android:contentDescription="关闭"
+        android:elevation="10dp"
+    />
 
     <org.webrtc.SurfaceViewRenderer
         android:id="@+id/LocalViewRender"
@@ -18,7 +30,7 @@
         android:layout_height="186dp"
         android:layout_gravity="bottom|end"
         android:layout_margin="20dp" />
-
+    <!-- 日志显示 -->
     <TextView
         android:id="@+id/logShowTV"
         android:layout_width="match_parent"
@@ -27,6 +39,12 @@
         android:gravity="top|start"
         android:textColor="#FF0000"
         tools:text="发发发发发发付 " />
+    <!-- 底部控制栏 -->
+    <include
+        layout="@layout/view_call_controls"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom" />
     <FrameLayout
         android:id="@+id/call_fragment_container"
         android:layout_width="match_parent"
